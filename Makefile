@@ -4,7 +4,7 @@ EXE_NAME := agc
 all: build_install
 
 configure:
-	@if [ ! -d "$(BUILD_DIR)" ]; then cmake -B $(BUILD_DIR); fi
+	@cmake $(BUILD_DIR)
 
 build: configure
 	@cmake --build $(BUILD_DIR)

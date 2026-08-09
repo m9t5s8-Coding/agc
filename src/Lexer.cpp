@@ -6,7 +6,7 @@
 #include <utility>
 
 namespace ag {
-Lexer::Lexer() {}
+Lexer::Lexer() { m_tokens.reserve(code_size() / 8); }
 
 // TODO : Sort in order for faster search
 bool Lexer::contains(const std::string_view str_view, Token& out_token) {

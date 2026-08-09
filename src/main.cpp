@@ -1,4 +1,5 @@
 #include "Lexer.hpp"
+#include "Parser.hpp"
 
 #include <cstdlib>
 #include <fstream>
@@ -20,13 +21,17 @@ int main(int argc, char* argv[]) {
     }
     buffer << file.rdbuf();
   }
-  ag::Lexer lexer;
+  ag::Parser parser;
   {
-    std::string file_data = buffer.str();
-    lexer.set_source_code(file_data);
+    ag::Lexer lexer;
+    {
+      std::string file_data = buffer.str();
+      lexer.set_source_code(file_data);
+    }
+    lexer.tokenize();
+    parser.set_tokens(lexer.get_tokens());
+    parser.parse();
   }
-  lexer.tokenize();
-  // std::cout << lexer << std::endl;
 
   return EXIT_SUCCESS;
 }

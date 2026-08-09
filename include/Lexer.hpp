@@ -13,7 +13,7 @@ public:
   Lexer();
   void set_source_code(std::string& data) { m_source_code = std::move(data); }
 
-  const TokensVector& get_tokens() const { return m_tokens; }
+  TokensVector& get_tokens() { return m_tokens; }
 
   void tokenize();
   void print_tokens() const;
