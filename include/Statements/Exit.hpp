@@ -15,7 +15,7 @@ public:
 
   static AG_scope<Statements> ParseExit(Parser& parser, TokenName token);
 
-  virtual void generate(std::stringstream& ss) override;
+  virtual void generate(CodeGenContext&) override;
 
 private:
   int                         exit_code;

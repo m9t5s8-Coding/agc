@@ -12,9 +12,10 @@ Lexer::Lexer() { m_tokens.reserve(code_size() / 8); }
 bool Lexer::contains(const std::string_view str_view, Token& out_token) {
   constexpr static std::pair<std::string_view, Token> s_keyword_map[] = {
 
-      {  "exit",   {TokenName::AG_EXIT}},
-      {  "func",   {TokenName::AG_FUNC}},
-      {"return", {TokenName::AG_RETURN}},
+      {   "exit",    {TokenName::AG_EXIT}},
+      {   "func",    {TokenName::AG_FUNC}},
+      { "return",  {TokenName::AG_RETURN}},
+      {"println", {TokenName::AG_PRINTLN}},
   };
 
   for (const auto& [view, token] : s_keyword_map) {

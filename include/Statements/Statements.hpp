@@ -1,6 +1,9 @@
 #pragma once
+
+#include <cstdint>
 #include <memory>
 #include <sstream>
+#include <unordered_map>
 
 namespace ag {
 template <typename T>
@@ -19,11 +22,19 @@ constexpr AG_scope<T> AG_cscope(Args&&... args) {
   return std::make_unique<T>(std::forward<Args>(args)...);
 }
 
+struct CodeGenContext {
+  std::stringstream                                 code;
+  std::stringstream                                 data;
+  uint32_t                                          label = 0;
+  std::unordered_map<std::string, std::string_view> symbol_table;
+};
+
 class Statements {
 public:
   Statements() {}
   virtual ~Statements() {}
 
-  virtual void generate(std::stringstream& ss) = 0;
+  virtual void generate(CodeGenContext&) = 0;
 };
+
 }  // namespace ag
