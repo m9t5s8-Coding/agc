@@ -13,6 +13,9 @@ public:
   TokenName    peek_token_name() const { return peek_token().token_name; }
   const Token& get_current_token() const { return is_valid() ? m_tokens[m_index] : m_EOToken; }
 
+  size_t       get_current_position() const { return m_index; }
+  const Token& get_token(size_t index) { return is_valid(index) ? m_tokens[index] : m_EOToken; }
+
   void add_statements(AG_scope<Statements>& ptr) {
     if (ptr) {
       m_statemets.emplace_back(std::move(ptr));
@@ -27,6 +30,7 @@ public:
   }
   void increase_token() { m_index++; }
   bool is_valid() const { return (m_index + 1) < tokens_size(); }
+  bool is_valid(size_t index) const { return index < tokens_size(); }
 
   void parse();
 

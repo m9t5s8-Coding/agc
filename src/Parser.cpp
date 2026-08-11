@@ -1,6 +1,7 @@
 #include "Parser.hpp"
 
 #include "Statements/Exit.hpp"
+#include "Statements/Let.hpp"
 #include "Statements/Println.hpp"
 #include "Statements/Statements.hpp"
 #include "Token.hpp"
@@ -49,6 +50,11 @@ bool Parser::scan_token(const Token& token) {
     case TokenName::AG_PRINTLN: {
       auto print_ptr = PrintlnStatement::ParsePrintln(*this, token.token_name);
       add_statements(print_ptr);
+      return true;
+    }
+    case TokenName::AG_LET: {
+      auto let_ptr = LetStatement::ParseLet(*this, token.token_name);
+      add_statements(let_ptr);
       return true;
     }
     default: return false;

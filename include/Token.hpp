@@ -7,6 +7,11 @@ enum class TokenName {
   AG_FUNC,
   AG_IDENTIFIER,
 
+  AG_STRING,
+  AG_INT,
+  AG_LET,
+  AG_VAR,
+
   AG_INT_LITERAL,
   AG_FLOAT_LITERAL,
   AG_STRING_LITERAL,

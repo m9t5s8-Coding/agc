@@ -16,6 +16,9 @@ bool Lexer::contains(const std::string_view str_view, Token& out_token) {
       {   "func",    {TokenName::AG_FUNC}},
       { "return",  {TokenName::AG_RETURN}},
       {"println", {TokenName::AG_PRINTLN}},
+      { "string",  {TokenName::AG_STRING}},
+      {    "let",     {TokenName::AG_LET}},
+      {    "var",     {TokenName::AG_VAR}},
   };
 
   for (const auto& [view, token] : s_keyword_map) {
