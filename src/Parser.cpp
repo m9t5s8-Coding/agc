@@ -1,24 +1,32 @@
 #include "Parser.hpp"
 
-#include "Statements/Exit.hpp"
 #include "Statements/Let.hpp"
-#include "Statements/Println.hpp"
 #include "Statements/Statements.hpp"
+#include "Statements/body.hpp"
+#include "Statements/exit.hpp"
+#include "Statements/function.hpp"
+#include "Statements/write.hpp"
 #include "Token.hpp"
 
 #include <fstream>
 
 namespace ag {
-void Parser::parse() {
+void
+Parser::parse() {
   while (is_valid()) {
-    const auto& token = get_current_token();
-    scan_token(token);
-    increase_token();
+    if (!add_statements(parse_statement())) {
+      m_invalid_syntax = true;
+      break;
+    }
+    advance();
+  }
+  if (m_invalid_syntax) {
+    return;
   }
 
   CodeGenContext context;
-  context.code << "_start:\n";
-  for (const auto& ptr : m_statemets) {
+  context.text << "_start:\n";
+  for (const auto& ptr : m_statements) {
     ptr->generate(context);
   }
 
@@ -32,33 +40,36 @@ void Parser::parse() {
        << context.data.str() << "\n"
        << "section .text\n"
        << "global _start\n\n"
-       << context.code.str();
+       << context.text.str();
     outfile << ss.str();
     outfile.close();
-    system("nasm -f elf64 out.asm -o out.o");
-    system("ld out.o -o out");
+    // system("nasm -f elf64 out.asm -o out.o");
+    // system("ld out.o -o out");
   }
 }
 
-bool Parser::scan_token(const Token& token) {
+AG_scope<Statements>
+Parser::parse_statement() {
+  const auto& token = current_token();
   switch (token.token_name) {
-    case ag::TokenName::AG_EXIT: {
-      auto exit_ptr = ExitStatement::ParseExit(*this, token.token_name);
-      add_statements(exit_ptr);
-      return true;
-    }
-    case TokenName::AG_PRINTLN: {
-      auto print_ptr = PrintlnStatement::ParsePrintln(*this, token.token_name);
-      add_statements(print_ptr);
-      return true;
-    }
-    case TokenName::AG_LET: {
-      auto let_ptr = LetStatement::ParseLet(*this, token.token_name);
-      add_statements(let_ptr);
-      return true;
-    }
-    default: return false;
+  case ag::TokenName::AG_EXIT: {
+    return ExitStatement::ParseExit(*this);
   }
-  return false;
+  case TokenName::AG_WRITE: {
+    return WriteStatement::ParseWrite(*this);
+  }
+  case TokenName::AG_LET: {
+    return LetStatement::ParseLet(*this);
+  }
+  case TokenName::AG_FUNC: {
+    return FunctionStatement::ParseFunction(*this);
+  }
+  case TokenName::AG_LEFT_BRACE: {
+    return BodyStatement::ParseBlock(*this);
+  }
+  default:
+    return nullptr;
+  }
+  return nullptr;
 }
-}  // namespace ag
+} // namespace ag

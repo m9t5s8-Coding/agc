@@ -7,7 +7,9 @@
 #include <sstream>
 #include <string>
 
-int main(int argc, char* argv[]) {
+int
+main(int   argc,
+     char* argv[]) {
   if (argc < 2) {
     std::cout << "Usuage: agc <file> ...\n";
     return EXIT_FAILURE;
@@ -21,16 +23,17 @@ int main(int argc, char* argv[]) {
     }
     buffer << file.rdbuf();
   }
-  ag::Parser parser;
-  {
-    ag::Lexer lexer;
-    {
-      std::string file_data = buffer.str();
-      lexer.set_source_code(file_data);
-    }
-    lexer.tokenize();
-    parser.set_tokens(lexer.get_tokens());
-    parser.parse();
+  ag::Parser  parser;
+  ag::Lexer   lexer;
+  std::string file_data = buffer.str();
+  lexer.set_filename(argv[1]);
+  lexer.set_source_code(file_data);
+  lexer.tokenize();
+  parser.set_lexer(lexer);
+  parser.parse();
+  if (!parser.is_syntax_valid()) {
+    std::cout << "Invalid Syntax!" << std::endl;
+    return EXIT_SUCCESS;
   }
 
   return EXIT_SUCCESS;

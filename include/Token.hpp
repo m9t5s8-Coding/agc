@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <string_view>
 
 namespace ag {
@@ -7,8 +8,8 @@ enum class TokenName {
   AG_FUNC,
   AG_IDENTIFIER,
 
-  AG_STRING,
-  AG_INT,
+  AG_KEYWORD,
+
   AG_LET,
   AG_VAR,
 
@@ -46,23 +47,44 @@ enum class TokenName {
 
   AG_ARROW,
 
-  AG_PRINTLN,
+  AG_WRITE,
+  AG_READ,
   AG_RETURN,
   AG_EXIT,
 };
 
 struct Token {
   constexpr Token()
-    : token_name{TokenName::AG_NONE},
-      value{""} {}
-  constexpr Token(const TokenName token)
-    : token_name{token},
-      value{""} {}
+      : token_name{TokenName::AG_NONE},
+        value{""},
+        line{1},
+        column{1} {}
 
-  Token(const TokenName token, const std::string_view value)
-    : token_name{token},
-      value{value} {}
+  constexpr Token(const TokenName token)
+      : token_name{token},
+        value{""},
+        line{1},
+        column{1} {}
+
+  constexpr Token(const TokenName        token,
+                  const std::string_view value)
+      : token_name{token},
+        value{value},
+        line{1},
+        column{1} {}
+
+  constexpr Token(const TokenName        token,
+                  const std::string_view value,
+                  uint32_t               line,
+                  uint32_t               column)
+      : token_name{token},
+        value{value},
+        line{line},
+        column{column} {}
+
   TokenName        token_name;
   std::string_view value;
+  std::uint32_t    line;
+  uint32_t         column;
 };
-}  // namespace ag
+} // namespace ag

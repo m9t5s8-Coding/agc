@@ -6,20 +6,22 @@ namespace ag {
 
 class LetStatement : public Statements {
 public:
-  LetStatement()
-    : variable_name("") {}
-  LetStatement(const std::string& name)
-    : variable_name(name) {}
+  LetStatement() : variable_name("") {}
+  LetStatement(const std::string& name) : variable_name(name) {}
 
   virtual ~LetStatement() {}
 
-  static AG_scope<Statements> ParseLet(Parser& parser, TokenName token);
+  static AG_scope<Statements>
+  ParseLet(Parser& parser);
 
-  virtual void generate(CodeGenContext& context) override;
+  virtual void
+  generate(CodeGenContext& context) override;
 
 private:
   std::string variable_name;
 
-  static AG_scope<Statements> LetString(Parser&, size_t);
+  static AG_scope<Statements>
+  LetString(Parser&,
+            size_t);
 };
-}  // namespace ag
+} // namespace ag

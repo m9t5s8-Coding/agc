@@ -9,16 +9,23 @@ namespace ag {
 Lexer::Lexer() { m_tokens.reserve(code_size() / 8); }
 
 // TODO : Sort in order for faster search
-bool Lexer::contains(const std::string_view str_view, Token& out_token) {
+bool
+Lexer::contains(const std::string_view str_view,
+                Token&                 out_token) {
   constexpr static std::pair<std::string_view, Token> s_keyword_map[] = {
 
-      {   "exit",    {TokenName::AG_EXIT}},
-      {   "func",    {TokenName::AG_FUNC}},
-      { "return",  {TokenName::AG_RETURN}},
-      {"println", {TokenName::AG_PRINTLN}},
-      { "string",  {TokenName::AG_STRING}},
-      {    "let",     {TokenName::AG_LET}},
-      {    "var",     {TokenName::AG_VAR}},
+      {"exit", {TokenName::AG_EXIT}},
+      {"func", {TokenName::AG_FUNC}},
+      {"return", {TokenName::AG_RETURN}},
+      {"write", {TokenName::AG_WRITE}},
+      {"read", {TokenName::AG_READ}},
+      {"char", {TokenName::AG_KEYWORD, "char"}},
+      {"int", {TokenName::AG_KEYWORD, "int"}},
+      {"float", {TokenName::AG_KEYWORD, "float"}},
+      {"bool", {TokenName::AG_KEYWORD, "bool"}},
+      {"void", {TokenName::AG_KEYWORD, "void"}},
+      {"let", {TokenName::AG_LET}},
+      {"var", {TokenName::AG_VAR}},
   };
 
   for (const auto& [view, token] : s_keyword_map) {
@@ -30,7 +37,9 @@ bool Lexer::contains(const std::string_view str_view, Token& out_token) {
   return false;
 }
 
-void Lexer::tokenize() {
+void
+Lexer::tokenize() {
+  m_line_starts.push_back(0);
   while (m_index < code_size()) {
     const char c = m_source_code[m_index];
     if (!scan_char(c))
@@ -39,136 +48,139 @@ void Lexer::tokenize() {
   }
 }
 
-bool Lexer::scan_char(const char c) {
+bool
+Lexer::scan_char(const char c) {
   switch (c) {
-    case '\n': {
-      return true;
-    }
-    case '#': {
-      while (peek() != '\n') {
-        increase();
-      }
+  case '\n': {
+    process_new_line();
+    return true;
+  }
+  case '#': {
+    while (peek() != '\n') {
       increase();
-      return true;
     }
-    case ';': {
-      add_token({TokenName::AG_SEMICOLON});
-      return true;
-    }
-    case '(': {
-      add_token({TokenName::AG_LEFT_PAREN});
-      return true;
-    }
-    case ')': {
-      add_token({TokenName::AG_RIGHT_PAREN});
-      return true;
-    }
-    case '{': {
-      add_token({TokenName::AG_LEFT_BRACE});
-      return true;
-    }
-    case '}': {
-      add_token({TokenName::AG_RIGHT_BRACE});
-      return true;
-    }
-    case '[': {
-      add_token({TokenName::AG_LEFT_BRACKET});
-      return true;
-    }
-    case ']': {
-      add_token({TokenName::AG_RIGHT_BRACKET});
-      return true;
-    }
-    case '+': {
-      add_token({TokenName::AG_PLUS});
-      return true;
-    }
-    case '-': {
-      if (peek() == '>') {
-        increase();
-        add_token({TokenName::AG_ARROW});
-        return true;
-      }
-      add_token({TokenName::AG_MINUS});
-      return true;
-    }
-    case '*': {
-      add_token({TokenName::AG_ASTRIC});
-      return true;
-    }
-    case '/': {
-      add_token({TokenName::AG_SLASH});
-      return true;
-    }
-    case '=': {
-      add_token({TokenName::AG_ASSIGN});
-      return true;
-    }
-    case '!': {
-      add_token({TokenName::AG_NOT});
-      return true;
-    }
-    case '%': {
-      add_token({TokenName::AD_MODULO});
-      return true;
-    }
-    case '&': {
-      add_token({TokenName::AG_ADDRESS});
-      return true;
-    }
-    case ':': {
-      add_token({TokenName::AG_COLON});
-      return true;
-    }
-    case '"': {
+    increase();
+    process_new_line();
+    return true;
+  }
+  case ';': {
+    add_token({TokenName::AG_SEMICOLON});
+    return true;
+  }
+  case '(': {
+    add_token({TokenName::AG_LEFT_PAREN});
+    return true;
+  }
+  case ')': {
+    add_token({TokenName::AG_RIGHT_PAREN});
+    return true;
+  }
+  case '{': {
+    add_token({TokenName::AG_LEFT_BRACE});
+    return true;
+  }
+  case '}': {
+    add_token({TokenName::AG_RIGHT_BRACE});
+    return true;
+  }
+  case '[': {
+    add_token({TokenName::AG_LEFT_BRACKET});
+    return true;
+  }
+  case ']': {
+    add_token({TokenName::AG_RIGHT_BRACKET});
+    return true;
+  }
+  case '+': {
+    add_token({TokenName::AG_PLUS});
+    return true;
+  }
+  case '-': {
+    if (peek() == '>') {
       increase();
-      create_stringn_literal();
+      add_token({TokenName::AG_ARROW});
       return true;
     }
-    case '\'': {
+    add_token({TokenName::AG_MINUS});
+    return true;
+  }
+  case '*': {
+    add_token({TokenName::AG_ASTRIC});
+    return true;
+  }
+  case '/': {
+    add_token({TokenName::AG_SLASH});
+    return true;
+  }
+  case '=': {
+    add_token({TokenName::AG_ASSIGN});
+    return true;
+  }
+  case '!': {
+    add_token({TokenName::AG_NOT});
+    return true;
+  }
+  case '%': {
+    add_token({TokenName::AD_MODULO});
+    return true;
+  }
+  case '&': {
+    add_token({TokenName::AG_ADDRESS});
+    return true;
+  }
+  case ':': {
+    add_token({TokenName::AG_COLON});
+    return true;
+  }
+  case '"': {
+    increase();
+    create_stringn_literal();
+    return true;
+  }
+  case '\'': {
+    increase();
+    create_char_literal();
+    return true;
+  }
+  case '<': {
+    if (peek() == '=') {
       increase();
-      create_char_literal();
+      add_token({TokenName::AG_LESS_EQUAL});
       return true;
     }
-    case '<': {
-      if (peek() == '=') {
-        increase();
-        add_token({TokenName::AG_LESS_EQUAL});
-        return true;
-      }
-      add_token({TokenName::AG_LESS});
+    add_token({TokenName::AG_LESS});
+    return true;
+  }
+  case '>': {
+    if (peek() == '=') {
+      increase();
+      add_token({TokenName::AG_GREATER_EQUAL});
       return true;
     }
-    case '>': {
-      if (peek() == '=') {
-        increase();
-        add_token({TokenName::AG_GREATER_EQUAL});
-        return true;
-      }
-      add_token({TokenName::AG_GREATER});
-      return true;
-    }
-    case ',': {
-      add_token({TokenName::AG_COMMA});
-      return true;
-    }
-    case '.': {
-      add_token({TokenName::AG_DOT});
-      return true;
-    }
-    default: return false;
+    add_token({TokenName::AG_GREATER});
+    return true;
+  }
+  case ',': {
+    add_token({TokenName::AG_COMMA});
+    return true;
+  }
+  case '.': {
+    add_token({TokenName::AG_DOT});
+    return true;
+  }
+  default:
+    return false;
   }
   return false;
 }
 
-void Lexer::create_keyword(const char c) {
+void
+Lexer::create_keyword(const char c) {
   auto is_char = [](const char c) {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
   };
 
-  auto is_num = [](const char c) {
-    return c >= '0' && c <= '9';
-  };
+  auto is_num = [](const char c) { return c >= '0' && c <= '9'; };
 
   if (is_char(c)) {
     m_buffer = get();
@@ -187,7 +199,8 @@ void Lexer::create_keyword(const char c) {
   }
 }
 
-void Lexer::create_stringn_literal() {
+void
+Lexer::create_stringn_literal() {
   // auto is_ascii = [](const char c) {
   //   return c != '"' && c >= 32 && c <= 126;
   // };
@@ -201,51 +214,48 @@ void Lexer::create_stringn_literal() {
   while (peek() != '"') {
     consume();
   }
-  add_token({
-      TokenName::AG_STRING_LITERAL,
-      {m_buffer, buffer_size()}
-  });
+  add_token({TokenName::AG_STRING_LITERAL, {m_buffer, buffer_size()}});
   increase();
   clear_buffer();
 }
 
-void Lexer::create_char_literal() {
+void
+Lexer::create_char_literal() {
   // auto is_ascii = [](const char c) {
   //   return c >= 32 && c <= 126;
   // };
 }
 
-void Lexer::process_word_buffer() {
+void
+Lexer::process_word_buffer() {
   if (Token token; contains({m_buffer, buffer_size()}, token)) {
     add_token(token);
   } else {
-    add_token({
-        TokenName::AG_IDENTIFIER,
-        {m_buffer, buffer_size()}
-    });
+    add_token({TokenName::AG_IDENTIFIER, {m_buffer, buffer_size()}});
   }
   clear_buffer();
 }
 
-void Lexer::process_number_buffer() {
-  add_token({
-      TokenName::AG_INT_LITERAL,
-      {m_buffer, buffer_size()}
-  });
+void
+Lexer::process_number_buffer() {
+  add_token({TokenName::AG_INT_LITERAL, {m_buffer, buffer_size()}});
   clear_buffer();
 }
 
-void Lexer::print_tokens() const {
+void
+Lexer::print_tokens() const {
   for (const auto t : m_tokens) {
     std::cout << static_cast<int>(t.token_name) << ' ';
   }
 }
 
-std::ostream& operator<<(std::ostream& ss, const Lexer& tokenizer) {
+std::ostream&
+operator<<(std::ostream& ss,
+           const Lexer&  tokenizer) {
   for (const auto t : tokenizer.m_tokens) {
     ss << static_cast<int>(t.token_name) << ' ';
   }
   return ss;
 }
 
-}  // namespace ag
+} // namespace ag
