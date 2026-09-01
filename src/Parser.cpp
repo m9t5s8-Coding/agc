@@ -5,6 +5,7 @@
 #include "Statements/body.hpp"
 #include "Statements/exit.hpp"
 #include "Statements/function.hpp"
+#include "Statements/read.hpp"
 #include "Statements/write.hpp"
 #include "Token.hpp"
 
@@ -18,7 +19,7 @@ Parser::parse() {
       m_invalid_syntax = true;
       break;
     }
-    advance();
+    // advance();
   }
   if (m_invalid_syntax) {
     return;
@@ -51,12 +52,16 @@ Parser::parse() {
 AG_scope<Statements>
 Parser::parse_statement() {
   const auto& token = current_token();
+
   switch (token.token_name) {
   case ag::TokenName::AG_EXIT: {
     return ExitStatement::ParseExit(*this);
   }
   case TokenName::AG_WRITE: {
     return WriteStatement::ParseWrite(*this);
+  }
+  case TokenName::AG_READ: {
+    return ReadStatement::ParseRead(*this);
   }
   case TokenName::AG_LET: {
     return LetStatement::ParseLet(*this);

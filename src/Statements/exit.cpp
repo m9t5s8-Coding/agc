@@ -16,7 +16,6 @@ ExitStatement::ParseExit(Parser& parser) {
   parser.advance();
   TokenName temp_token;
   if (!parser.match_one_of({TokenName::AG_LEFT_PAREN, TokenName::AG_IDENTIFIER}, &temp_token)) {
-    std::cout << "Here Wrong!";
     return nullptr;
   }
 
@@ -28,7 +27,7 @@ ExitStatement::ParseExit(Parser& parser) {
   }
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_SEMICOLON, ag::error::ExpectedSemicolon, nullptr);
 
-  return nullptr;
+  return AG_cscope<ExitStatement>();
 }
 
 void

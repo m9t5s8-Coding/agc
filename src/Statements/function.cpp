@@ -55,27 +55,31 @@ FunctionStatement::ParseFunction(Parser& parser) {
       parser, TokenName::AG_IDENTIFIER, ag::error::ExpectedFunctionName, function_statement->m_function_name, nullptr);
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, ag::error::ExpectedLeftParen, nullptr);
+
   AG_PARSE_OPT_OR_RETURN(parser, parse_function_parameter, function_statement->m_parameters, nullptr);
 
   {
-    AG_EXPECT_ONE_OF_OR_RETURN(
+    AG_CHECK_ONE_OF_OR_RETURN(
         parser, "", &temp_token, nullptr, TokenName::AG_ARROW, TokenName::AG_LEFT_BRACE, TokenName::AG_SEMICOLON);
 
     if (temp_token == TokenName::AG_ARROW) {
+      parser.advance();
       AG_PARSE_OPT_OR_RETURN(parser, parse_return_type, function_statement->m_return_type, nullptr);
 
-      AG_EXPECT_ONE_OF_OR_RETURN(parser,
-                                 ag::error::ExpectedAfterReturnType,
-                                 &temp_token,
-                                 nullptr,
-                                 TokenName::AG_LEFT_BRACE,
-                                 TokenName::AG_SEMICOLON);
+      AG_CHECK_ONE_OF_OR_RETURN(parser,
+                                ag::error::ExpectedAfterReturnType,
+                                &temp_token,
+                                nullptr,
+                                TokenName::AG_LEFT_BRACE,
+                                TokenName::AG_SEMICOLON);
     }
+
     if (temp_token == TokenName::AG_SEMICOLON) {
+      parser.advance();
       function_statement->is_declaration = true;
       return function_statement;
     } else if (temp_token == TokenName::AG_LEFT_BRACE) {
-      AG_PARSE_STATEMENT(parser, function_statement->m_function_body, nullptr);
+      AG_PARSE_SCOPE(parser, function_statement->m_function_body, nullptr);
     }
   }
   return function_statement;
