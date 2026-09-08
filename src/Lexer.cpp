@@ -92,16 +92,33 @@ Lexer::scan_char(const char c) {
     return true;
   }
   case '+': {
-    add_token({TokenName::AG_PLUS});
+    char c = peek();
+    if (c == '+') {
+      increase();
+      add_token({TokenName::AG_INCREMENT});
+    } else if (c == '=') {
+      increase();
+      add_token({TokenName::AG_ADDITION_ASSIGNMENT});
+    } else {
+      add_token({TokenName::AG_PLUS});
+    }
     return true;
   }
   case '-': {
-    if (peek() == '>') {
+    char c = peek();
+    if (c == '>') {
       increase();
       add_token({TokenName::AG_ARROW});
-      return true;
+    } else if (c == '-') {
+      increase();
+      add_token({TokenName::AG_DECREMENT});
+    } else if (c == '=') {
+      increase();
+      add_token({TokenName::AG_SUBTRACTION_ASSIGNMENT});
+    } else {
+      add_token({TokenName::AG_MINUS});
     }
-    add_token({TokenName::AG_MINUS});
+
     return true;
   }
   case '*': {
@@ -117,7 +134,11 @@ Lexer::scan_char(const char c) {
     return true;
   }
   case '!': {
-    add_token({TokenName::AG_NOT});
+    add_token({TokenName::AG_LOGICAL_NOT});
+    return true;
+  }
+  case '~': {
+    add_token({TokenName::AG_BITWISE_NOT});
     return true;
   }
   case '%': {
@@ -176,9 +197,7 @@ Lexer::scan_char(const char c) {
 
 void
 Lexer::create_keyword(const char c) {
-  auto is_char = [](const char c) {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
-  };
+  auto is_char = [](const char c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_'; };
 
   auto is_num = [](const char c) { return c >= '0' && c <= '9'; };
 

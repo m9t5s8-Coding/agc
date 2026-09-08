@@ -33,6 +33,15 @@ namespace ag {
     (parser_ref).advance();                                                                                            \
   } while (0)
 
+#define AG_PARSE_EXPRESSION_OR_RETURN(parser_ref, out_var, fail_value)                                                 \
+  do {                                                                                                                 \
+    auto _ag_parse_result = Expression::parse_expressions((parser_ref));                                               \
+    if (!_ag_parse_result) {                                                                                           \
+      return fail_value;                                                                                               \
+    }                                                                                                                  \
+    (out_var) = std::move(_ag_parse_result);                                                                           \
+  } while (0)
+
 #define AG_PARSE_OPT_OR_RETURN(parser_ref, parser_fn, out_var, fail_value)                                             \
   do {                                                                                                                 \
     auto _ag_parse_result = parser_fn(parser_ref);                                                                     \

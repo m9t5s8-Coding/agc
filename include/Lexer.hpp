@@ -40,9 +40,7 @@ public:
   std::string_view
   get_line_text(size_t line_number) const {
     size_t start = m_line_starts[line_number - 1];
-    size_t end   = line_number < m_line_starts.size()
-                       ? m_line_starts[line_number] - 1
-                       : m_source_code.size();
+    size_t end   = line_number < m_line_starts.size() ? m_line_starts[line_number] - 1 : m_source_code.size();
     if (end > start && m_source_code[end] == '\n')
       --end;
 

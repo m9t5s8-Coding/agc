@@ -93,8 +93,7 @@ public:
   get_symbol_table();
 
 private:
-  using SymbolTableVector =
-      std::vector<std::unordered_map<std::string, SymbolEntry>>;
+  using SymbolTableVector = std::vector<std::unordered_map<std::string, SymbolEntry>>;
 
   SymbolTableVector m_scopes;
   int64_t           m_current_stack_offset = 0;

@@ -3,6 +3,7 @@
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 // #include "SymbolTable.hpp"
+#include "Statements/body.hpp"
 #include "Token.hpp"
 #include "error_msg.hpp"
 #include "macro.hpp"

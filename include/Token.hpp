@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <iostream>
 #include <string_view>
 
 namespace ag {
@@ -30,14 +31,21 @@ enum class TokenName {
   AG_COMMA,
 
   AG_PLUS,
+  AG_INCREMENT,
+  AG_ADDITION_ASSIGNMENT,
   AG_MINUS,
+  AG_DECREMENT,
+  AG_SUBTRACTION_ASSIGNMENT,
   AG_ASTRIC,
+  AG_MULTIPLY_ASSIGNMENT,
   AG_SLASH,
+  AG_DIVISION_ASSIGNMENT,
   AG_ASSIGN,
 
   AG_ADDRESS,
   AD_MODULO,
-  AG_NOT,
+  AG_LOGICAL_NOT,
+  AG_BITWISE_NOT,
   AG_DOT,
 
   AG_GREATER,

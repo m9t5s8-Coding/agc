@@ -2,7 +2,6 @@
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
-#include "Statements/body.hpp"
 
 // func main(num1: int, num2: int) -> int;
 // func main(int, int) -> int;
@@ -14,8 +13,8 @@
 namespace ag {
 
 struct FunctionParam {
-  std::string name;
-  DATA_TYPES  type;
+  std::string_view name;
+  DATA_TYPES       type;
 };
 
 class FunctionStatement : public Statements {
