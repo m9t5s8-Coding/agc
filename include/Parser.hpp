@@ -41,6 +41,14 @@ public:
     return is_valid(offset) ? m_tokens[m_index + offset] : m_EOToken;
   }
 
+  bool
+  peek_token_name(TokenName* token_name) const {
+    if (!is_valid())
+      return false;
+    *token_name = peek_token().token_name;
+    return true;
+  }
+
   // Check the current token
   bool
   check(TokenName token_name) const {

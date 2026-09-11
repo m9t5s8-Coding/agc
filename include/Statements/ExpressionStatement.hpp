@@ -10,6 +10,9 @@ public:
   static AG_scope<Statements>
   parse_expression_statement(Parser&);
 
+  virtual void
+  generate(CodeGenContext&) override {}
+
 private:
   AG_scope<Expression> m_expression;
 };

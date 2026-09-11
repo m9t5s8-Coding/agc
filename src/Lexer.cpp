@@ -55,144 +55,237 @@ Lexer::scan_char(const char c) {
     process_new_line();
     return true;
   }
+
   case '#': {
     while (peek() != '\n') {
       increase();
     }
+
     increase();
     process_new_line();
     return true;
   }
-  case ';': {
-    add_token({TokenName::AG_SEMICOLON});
+
+  case '"': {
+    increase();
+    create_stringn_literal();
     return true;
   }
+
+  case '\'': {
+    increase();
+    create_char_literal();
+    return true;
+  }
+
   case '(': {
     add_token({TokenName::AG_LEFT_PAREN});
     return true;
   }
+
   case ')': {
     add_token({TokenName::AG_RIGHT_PAREN});
     return true;
   }
+
   case '{': {
     add_token({TokenName::AG_LEFT_BRACE});
     return true;
   }
+
   case '}': {
     add_token({TokenName::AG_RIGHT_BRACE});
     return true;
   }
+
   case '[': {
     add_token({TokenName::AG_LEFT_BRACKET});
     return true;
   }
+
   case ']': {
     add_token({TokenName::AG_RIGHT_BRACKET});
     return true;
   }
+
+  case ';': {
+    add_token({TokenName::AG_SEMICOLON});
+    return true;
+  }
+
+  case ':': {
+    add_token({TokenName::AG_COLON});
+    return true;
+  }
+
+  case ',': {
+    add_token({TokenName::AG_COMMA});
+    return true;
+  }
+
   case '+': {
-    char c = peek();
-    if (c == '+') {
+    char next = peek();
+
+    if (next == '+') {
       increase();
       add_token({TokenName::AG_INCREMENT});
-    } else if (c == '=') {
+    } else if (next == '=') {
       increase();
       add_token({TokenName::AG_ADDITION_ASSIGNMENT});
     } else {
       add_token({TokenName::AG_PLUS});
     }
+
     return true;
   }
+
   case '-': {
-    char c = peek();
-    if (c == '>') {
-      increase();
-      add_token({TokenName::AG_ARROW});
-    } else if (c == '-') {
+    char next = peek();
+
+    if (next == '-') {
       increase();
       add_token({TokenName::AG_DECREMENT});
-    } else if (c == '=') {
+    } else if (next == '=') {
       increase();
       add_token({TokenName::AG_SUBTRACTION_ASSIGNMENT});
+    } else if (next == '>') {
+      increase();
+      add_token({TokenName::AG_ARROW});
     } else {
       add_token({TokenName::AG_MINUS});
     }
 
     return true;
   }
+
   case '*': {
-    add_token({TokenName::AG_ASTRIC});
+    if (peek() == '=') {
+      increase();
+      add_token({TokenName::AG_MULTIPLY_ASSIGNMENT});
+    } else {
+      add_token({TokenName::AG_ASTERISK});
+    }
+
     return true;
   }
+
   case '/': {
-    add_token({TokenName::AG_SLASH});
+    if (peek() == '=') {
+      increase();
+      add_token({TokenName::AG_DIVISION_ASSIGNMENT});
+    } else {
+      add_token({TokenName::AG_SLASH});
+    }
+
     return true;
   }
+
   case '=': {
-    add_token({TokenName::AG_ASSIGN});
+    if (peek() == '=') {
+      increase();
+      add_token({TokenName::AG_EQUAL_TO});
+    } else {
+      add_token({TokenName::AG_ASSIGN});
+    }
+
     return true;
   }
+
+  case '&': {
+    if (peek() == '&') {
+      increase();
+      add_token({TokenName::AG_LOGICAL_AND});
+    } else {
+      add_token({TokenName::AG_REFERENCE});
+    }
+
+    return true;
+  }
+
+  case '%': {
+    if (peek() == '=') {
+      increase();
+      add_token({TokenName::AG_MODULO_ASSIGNMENT});
+    } else {
+      add_token({TokenName::AG_MODULO});
+    }
+
+    return true;
+  }
+
   case '!': {
-    add_token({TokenName::AG_LOGICAL_NOT});
+    if (peek() == '=') {
+      increase();
+      add_token({TokenName::AG_NOT_EQUAL_TO});
+    } else {
+      add_token({TokenName::AG_LOGICAL_NOT});
+    }
+
     return true;
   }
+
+  case '|': {
+    if (peek() == '|') {
+      increase();
+      add_token({TokenName::AG_LOGICAL_OR});
+    } else {
+      add_token({TokenName::AG_BITWISE_OR});
+    }
+
+    return true;
+  }
+
   case '~': {
     add_token({TokenName::AG_BITWISE_NOT});
     return true;
   }
-  case '%': {
-    add_token({TokenName::AD_MODULO});
+
+  case '^': {
+    add_token({TokenName::AG_BITWISE_XOR});
     return true;
   }
-  case '&': {
-    add_token({TokenName::AG_ADDRESS});
-    return true;
-  }
-  case ':': {
-    add_token({TokenName::AG_COLON});
-    return true;
-  }
-  case '"': {
-    increase();
-    create_stringn_literal();
-    return true;
-  }
-  case '\'': {
-    increase();
-    create_char_literal();
-    return true;
-  }
+
   case '<': {
-    if (peek() == '=') {
+    if (peek() == '<') {
+      increase();
+      add_token({TokenName::AG_LEFT_SHIFT});
+    } else if (peek() == '=') {
       increase();
       add_token({TokenName::AG_LESS_EQUAL});
-      return true;
+    } else {
+      add_token({TokenName::AG_LESS});
     }
-    add_token({TokenName::AG_LESS});
+
     return true;
   }
+
   case '>': {
-    if (peek() == '=') {
+    if (peek() == '>') {
+      increase();
+      add_token({TokenName::AG_RIGHT_SHIFT});
+    } else if (peek() == '=') {
       increase();
       add_token({TokenName::AG_GREATER_EQUAL});
-      return true;
+    } else {
+      add_token({TokenName::AG_GREATER});
     }
-    add_token({TokenName::AG_GREATER});
+
     return true;
   }
-  case ',': {
-    add_token({TokenName::AG_COMMA});
-    return true;
-  }
+
   case '.': {
     add_token({TokenName::AG_DOT});
     return true;
   }
+
+  case '?': {
+    add_token({TokenName::AG_QUESTION});
+    return true;
+  }
+
   default:
     return false;
   }
-  return false;
 }
 
 void
