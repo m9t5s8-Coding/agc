@@ -1,5 +1,6 @@
 #include "Statements/return.hpp"
 
+#include "Expressions/Expression.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 // #include "SymbolTable.hpp"
@@ -11,22 +12,16 @@ namespace ag {
 
 AG_scope<Statements>
 ReturnStatement::ParseReturn(Parser& parser) {
-  auto exit_statement = AG_cscope<ReturnStatement>();
   parser.advance();
-  TokenName temp_token;
-  if (!parser.match_one_of({TokenName::AG_LEFT_PAREN, TokenName::AG_IDENTIFIER}, &temp_token)) {
-    return nullptr;
-  }
 
-  if (temp_token == TokenName::AG_LEFT_PAREN) {
-    AG_EXPECT_GET_VALUE_OR_RETURN(
-        parser, TokenName::AG_IDENTIFIER, ag::error::ExpectedIdentifier, exit_statement->value_or_name, nullptr);
+  auto return_stmt = AG_cscope<ReturnStatement>();
 
-    AG_EXPECT_OR_RETURN(parser, TokenName::AG_RIGHT_PAREN, ag::error::ExpectedRightParen, nullptr);
-  }
+  AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, error::ExpectedLeftParen, nullptr);
+  AG_PARSE_EXPRESSION_OR_RETURN(parser, return_stmt->return_expr, nullptr);
+  AG_EXPECT_OR_RETURN(parser, TokenName::AG_RIGHT_PAREN, ag::error::ExpectedRightParen, nullptr);
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_SEMICOLON, ag::error::ExpectedSemicolon, nullptr);
 
-  return AG_cscope<ReturnStatement>();
+  return return_stmt;
 }
 
 void

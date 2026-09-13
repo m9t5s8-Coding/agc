@@ -1,5 +1,6 @@
 #include "Statements/read.hpp"
 
+#include "Expressions/Expression.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 // #include "SymbolTable.hpp"
@@ -13,18 +14,17 @@ namespace ag {
 AG_scope<Statements>
 ReadStatement::ParseRead(Parser& parser) {
   parser.advance();
-  auto write_statement = AG_cscope<ReadStatement>();
+
+  auto write_stmt = AG_cscope<ReadStatement>();
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, ag::error::ExpectedLeftParen, nullptr);
-  AG_EXPECT_GET_VALUE_OR_RETURN(
-      parser, TokenName::AG_IDENTIFIER, ag::error::ExpectedIdentifier, write_statement->m_buffer, nullptr);
+  AG_PARSE_EXPRESSION_OR_RETURN(parser, write_stmt->m_buffer, nullptr);
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_COMMA, ag::error::ExpectedComma, nullptr);
-  AG_EXPECT_GET_VALUE_OR_RETURN(
-      parser, TokenName::AG_IDENTIFIER, ag::error::ExpectedIdentifier, write_statement->m_buffer_size, nullptr);
+  AG_PARSE_EXPRESSION_OR_RETURN(parser, write_stmt->m_buffer_size, nullptr);
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_RIGHT_PAREN, ag::error::ExpectedRightParen, nullptr);
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_SEMICOLON, ag::error::ExpectedSemicolon, nullptr);
 
-  return write_statement;
+  return write_stmt;
 }
 
 void

@@ -1,8 +1,10 @@
 #include "Parser.hpp"
 
 #include "Statements/ExpressionStatement.hpp"
+#include "Statements/If.hpp"
 #include "Statements/Let.hpp"
 #include "Statements/Statements.hpp"
+#include "Statements/While.hpp"
 #include "Statements/body.hpp"
 #include "Statements/exit.hpp"
 #include "Statements/function.hpp"
@@ -78,6 +80,12 @@ Parser::parse_statement() {
   }
   case TokenName::AG_RETURN: {
     return ReturnStatement::ParseReturn(*this);
+  }
+  case TokenName::AG_IF: {
+    return IfStatement::ParseIf(*this);
+  }
+  case TokenName::AG_WHILE: {
+    return WhileStatement::ParseWhile(*this);
   }
   default:
     return ExpressionStatement::parse_expression_statement(*this);

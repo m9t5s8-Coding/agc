@@ -79,6 +79,7 @@ enum class TokenName {
   AG_RETURN,
   AG_EXIT,
   AG_IF,
+  AG_ELSE,
   AG_WHILE,
 };
 

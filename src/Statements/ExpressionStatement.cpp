@@ -9,12 +9,13 @@ AG_scope<Statements>
 ExpressionStatement::parse_expression_statement(Parser& parser) {
   auto expr_statement = AG_cscope<ExpressionStatement>();
   auto expr           = Expression::parse_expressions(parser);
-  if (!expr)
-    return nullptr;
-  if (!parser.expect(TokenName::AG_SEMICOLON, error::ExpectedSemicolon)) {
+  if (!expr) {
     return nullptr;
   }
   expr_statement->m_expression = std::move(expr);
+  if (!parser.expect(TokenName::AG_SEMICOLON, error::ExpectedSemicolon)) {
+    return nullptr;
+  }
   return expr_statement;
 }
 } // namespace ag

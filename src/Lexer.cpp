@@ -27,6 +27,7 @@ Lexer::contains(const std::string_view str_view,
       {"let", {TokenName::AG_LET}},
       {"var", {TokenName::AG_VAR}},
       {"if", {TokenName::AG_IF}},
+      {"else", {TokenName::AG_ELSE}},
       {"while", {TokenName::AG_WHILE}},
   };
 

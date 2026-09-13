@@ -9,12 +9,22 @@
 //      num2 : int) -> int {
 //   return num1 + num2;
 // }
+// rect1 : Rectangle
+// user_defined
+// Rectangle
+// int
+// int
 
 namespace ag {
 
+struct DataType_Data {
+  DATA_TYPES       datatype_type = DATA_TYPES::VOID;
+  std::string_view datatype_name;
+};
+
 struct FunctionParam {
-  std::string_view name;
-  DATA_TYPES       type;
+  std::string_view variable_name;
+  DataType_Data    data_type;
 };
 
 class FunctionStatement : public Statements {
@@ -33,11 +43,6 @@ public:
   }
 
   void
-  set_return_type(DATA_TYPES type) {
-    m_return_type = type;
-  }
-
-  void
   set_function_name(std::string function_name) {
     m_function_name = std::move(function_name);
   }
@@ -47,7 +52,7 @@ private:
 
   std::string          m_function_name;
   FunctionParameter    m_parameters;
-  DATA_TYPES           m_return_type = DATA_TYPES::VOID;
+  DataType_Data        m_return_type;
   AG_scope<Statements> m_function_body;
   bool                 is_declaration = false;
 };

@@ -1,13 +1,12 @@
 
 #pragma once
-#include "Parser.hpp"
 #include "Statements/Statements.hpp"
 
 namespace ag {
-
+class Expression;
+class Parser;
 class ReturnStatement : public Statements {
 public:
-  ReturnStatement() : value_or_name("") {}
   virtual ~ReturnStatement() {}
 
   static AG_scope<Statements>
@@ -17,7 +16,6 @@ public:
   generate(CodeGenContext&) override;
 
 private:
-  std::string value_or_name;
-  // AG_scope<Expression> return_expression;
+  AG_scope<Expression> return_expr;
 };
 } // namespace ag

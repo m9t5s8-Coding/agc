@@ -5,12 +5,14 @@
 #include "Statements/Utils.hpp"
 // #include "SymbolTable.hpp"
 #include "Token.hpp"
+#include <iostream>
 
 namespace ag {
 AG_scope<Statements>
 BodyStatement::ParseBlock(Parser& parser) {
-  auto body_statement = AG_cscope<BodyStatement>();
   parser.advance();
+
+  auto body_statement = AG_cscope<BodyStatement>();
 
   while (!parser.check(TokenName::AG_RIGHT_BRACE)) {
     auto statement = parser.parse_statement();

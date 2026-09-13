@@ -15,6 +15,7 @@ namespace ag {
 AG_scope<Statements>
 WriteStatement::ParseWrite(Parser& parser) {
   parser.advance();
+
   auto write_statement = AG_cscope<WriteStatement>();
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, ag::error::ExpectedLeftParen, nullptr);

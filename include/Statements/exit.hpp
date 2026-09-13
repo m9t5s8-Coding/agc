@@ -1,12 +1,11 @@
 #pragma once
-#include "Parser.hpp"
 #include "Statements/Statements.hpp"
 
 namespace ag {
-
+class Expression;
+class Parser;
 class ExitStatement : public Statements {
 public:
-  ExitStatement() : value_or_name("") {}
   virtual ~ExitStatement() {}
 
   static AG_scope<Statements>
@@ -16,7 +15,6 @@ public:
   generate(CodeGenContext&) override;
 
 private:
-  std::string value_or_name;
-  EXPR_TYPE   type;
+  AG_scope<Expression> exit_expr;
 };
 } // namespace ag

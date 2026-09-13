@@ -1,33 +1,28 @@
 #include "Statements/exit.hpp"
 
+#include "Expressions/Expression.hpp"
+#include "Parser.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 // #include "SymbolTable.hpp"
 #include "Token.hpp"
 #include "error_msg.hpp"
 #include "macro.hpp"
-#include <iostream>
 
 namespace ag {
 
 AG_scope<Statements>
 ExitStatement::ParseExit(Parser& parser) {
-  auto exit_statement = AG_cscope<ExitStatement>();
   parser.advance();
-  TokenName temp_token;
-  if (!parser.match_one_of({TokenName::AG_LEFT_PAREN, TokenName::AG_IDENTIFIER}, &temp_token)) {
-    return nullptr;
-  }
 
-  if (temp_token == TokenName::AG_LEFT_PAREN) {
-    AG_EXPECT_GET_VALUE_OR_RETURN(
-        parser, TokenName::AG_IDENTIFIER, ag::error::ExpectedIdentifier, exit_statement->value_or_name, nullptr);
+  auto exit_stmt = AG_cscope<ExitStatement>();
 
-    AG_EXPECT_OR_RETURN(parser, TokenName::AG_RIGHT_PAREN, ag::error::ExpectedRightParen, nullptr);
-  }
+  AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, error::ExpectedLeftParen, nullptr);
+  AG_PARSE_EXPRESSION_OR_RETURN(parser, exit_stmt->exit_expr, nullptr);
+  AG_EXPECT_OR_RETURN(parser, TokenName::AG_RIGHT_PAREN, ag::error::ExpectedRightParen, nullptr);
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_SEMICOLON, ag::error::ExpectedSemicolon, nullptr);
 
-  return AG_cscope<ExitStatement>();
+  return exit_stmt;
 }
 
 void
