@@ -26,6 +26,8 @@ Lexer::contains(const std::string_view str_view,
       {"void", {TokenName::AG_KEYWORD, "void"}},
       {"let", {TokenName::AG_LET}},
       {"var", {TokenName::AG_VAR}},
+      {"if", {TokenName::AG_IF}},
+      {"while", {TokenName::AG_WHILE}},
   };
 
   for (const auto& [view, token] : s_keyword_map) {

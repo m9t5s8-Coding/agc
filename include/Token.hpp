@@ -78,6 +78,8 @@ enum class TokenName {
   AG_READ,
   AG_RETURN,
   AG_EXIT,
+  AG_IF,
+  AG_WHILE,
 };
 
 struct Token {
