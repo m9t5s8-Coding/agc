@@ -16,17 +16,6 @@
 // int
 
 namespace ag {
-
-struct DataType_Data {
-  DATA_TYPES       datatype_type = DATA_TYPES::VOID;
-  std::string_view datatype_name;
-};
-
-struct FunctionParam {
-  std::string_view variable_name;
-  DataType_Data    data_type;
-};
-
 class FunctionStatement : public Statements {
 public:
   virtual ~FunctionStatement() {}

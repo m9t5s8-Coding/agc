@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace ag {
 
@@ -12,6 +14,42 @@ enum class DATA_TYPES {
   CHAR,
   BOOL,
   USER_DEFINED,
+};
+enum class VARIABLE_TYPE : uint8_t { COMPILE, RUNTIME };
+
+struct DataType_Data {
+  DATA_TYPES       datatype_type = DATA_TYPES::VOID;
+  std::string_view datatype_name;
+};
+
+struct FunctionParam {
+  std::string_view variable_name;
+  DataType_Data    data_type;
+};
+
+struct DeclarationData {
+  DATA_TYPES    data_type = DATA_TYPES::VOID;
+  VARIABLE_TYPE decl_type = VARIABLE_TYPE::COMPILE;
+
+  std::string value;
+};
+struct SymbolEntry {
+  DATA_TYPES    data_type = DATA_TYPES::VOID;
+  VARIABLE_TYPE decl_type = VARIABLE_TYPE::COMPILE;
+
+  std::string value;
+
+  int64_t stack_offset = 0;
+
+  uint32_t scope_label = 0;
+};
+
+struct FunctionEntry {
+  std::string             name; // actual function name
+  DATA_TYPES              return_type = DATA_TYPES::VOID;
+  std::vector<DATA_TYPES> param_types;
+  bool                    is_defined  = false;
+  bool                    is_variadic = false;
 };
 
 inline DATA_TYPES

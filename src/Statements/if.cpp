@@ -1,4 +1,4 @@
-#include "Statements/If.hpp"
+#include "Statements/if.hpp"
 #include "Expressions/Expression.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"

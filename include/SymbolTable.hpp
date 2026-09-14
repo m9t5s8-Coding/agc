@@ -8,32 +8,6 @@
 #include <vector>
 
 namespace ag {
-enum class VARIABLE_TYPE : uint8_t { COMPILE, RUNTIME };
-
-struct DeclarationData {
-  DATA_TYPES    data_type = DATA_TYPES::VOID;
-  VARIABLE_TYPE decl_type = VARIABLE_TYPE::COMPILE;
-
-  std::string value;
-};
-struct SymbolEntry {
-  DATA_TYPES    data_type = DATA_TYPES::VOID;
-  VARIABLE_TYPE decl_type = VARIABLE_TYPE::COMPILE;
-
-  std::string value;
-
-  int64_t stack_offset = 0;
-
-  uint32_t scope_label = 0;
-};
-
-struct FunctionEntry {
-  std::string             name; // actual function name
-  DATA_TYPES              return_type = DATA_TYPES::VOID;
-  std::vector<DATA_TYPES> param_types;
-  bool                    is_defined  = false;
-  bool                    is_variadic = false;
-};
 
 class SymbolTable {
 public:
@@ -65,6 +39,7 @@ public:
     return true;
   }
 
+  // 0 1 2
   std::optional<SymbolEntry>
   lookup(const std::string& key) {
     for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); ++it) {

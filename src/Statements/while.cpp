@@ -1,8 +1,7 @@
-#include "Statements/While.hpp"
+#include "Statements/while.hpp"
 #include "Expressions/Expression.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
-#include "Statements/body.hpp"
 #include "error_msg.hpp"
 #include "macro.hpp"
 

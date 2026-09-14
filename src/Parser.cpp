@@ -1,20 +1,20 @@
 #include "Parser.hpp"
 
 #include "Statements/ExpressionStatement.hpp"
-#include "Statements/If.hpp"
-#include "Statements/Let.hpp"
 #include "Statements/Statements.hpp"
-#include "Statements/While.hpp"
 #include "Statements/body.hpp"
 #include "Statements/exit.hpp"
 #include "Statements/function.hpp"
+#include "Statements/if.hpp"
+#include "Statements/let.hpp"
 #include "Statements/read.hpp"
 #include "Statements/return.hpp"
+#include "Statements/var.hpp"
+#include "Statements/while.hpp"
 #include "Statements/write.hpp"
 #include "Token.hpp"
 
 #include <fstream>
-#include <iostream>
 
 namespace ag {
 void
@@ -71,6 +71,9 @@ Parser::parse_statement() {
   }
   case TokenName::AG_LET: {
     return LetStatement::ParseLet(*this);
+  }
+  case TokenName::AG_VAR: {
+    return VarStatement::ParseVar(*this);
   }
   case TokenName::AG_FUNC: {
     return FunctionStatement::ParseFunction(*this);

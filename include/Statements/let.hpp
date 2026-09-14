@@ -1,14 +1,12 @@
 #pragma once
-#include "Parser.hpp"
 #include "Statements/Statements.hpp"
+#include "Statements/Utils.hpp"
 
 namespace ag {
-
+class Expression;
+class Parser;
 class LetStatement : public Statements {
 public:
-  LetStatement() : variable_name("") {}
-  LetStatement(const std::string& name) : variable_name(name) {}
-
   virtual ~LetStatement() {}
 
   static AG_scope<Statements>
@@ -18,10 +16,8 @@ public:
   generate(CodeGenContext& context) override;
 
 private:
-  std::string variable_name;
-
-  static AG_scope<Statements>
-  LetString(Parser&,
-            size_t);
+  DataType_Data        m_datatype;
+  std::string_view     m_name;
+  AG_scope<Expression> m_expr;
 };
 } // namespace ag
