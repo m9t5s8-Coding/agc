@@ -41,8 +41,8 @@ namespace ag {
       print_error(msg, parser_ref);                                                                                    \
       return fail_value;                                                                                               \
     }                                                                                                                  \
-    (out_var).datatype_name = (parser_ref).current_token().value;                                                      \
-    (out_var).datatype_type = get_datatypes((out_var).datatype_name);                                                  \
+    (out_var).type_name      = (parser_ref).current_token().value;                                                     \
+    (out_var).primitive_type = get_datatypes((out_var).type_name);                                                     \
     (parser_ref).advance();                                                                                            \
   } while (0)
 

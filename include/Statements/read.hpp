@@ -14,6 +14,11 @@ public:
   virtual void
   generate(CodeGenContext& context) override;
 
+  virtual bool
+  analyze_semantics(Parser& parser) override {
+    return true;
+  }
+
 private:
   AG_scope<Expression> m_buffer;
   AG_scope<Expression> m_buffer_size;

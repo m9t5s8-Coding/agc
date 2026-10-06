@@ -1,133 +1,251 @@
 #pragma once
 
+#include "Expressions/Expression.hpp"
+#include "Token.hpp"
 #include <cstdint>
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace ag {
 
-enum class DATA_TYPES {
+enum class PrimitiveType {
   VOID,
   INT,
   FLOAT,
+  DOUBLE,
   CHAR,
   BOOL,
   USER_DEFINED,
 };
-enum class VARIABLE_TYPE : uint8_t { COMPILE, RUNTIME };
 
-struct DataType_Data {
-  DATA_TYPES       datatype_type = DATA_TYPES::VOID;
-  std::string_view datatype_name;
+enum class TypeKind {
+  PRIMITIVE,
+  POINTER,
+  REFERENCE,
+  ARRAY,
+  FUNCTION,
+  STRUCT,
+  ENUM,
 };
 
-struct FunctionParam {
-  std::string_view variable_name;
-  DataType_Data    data_type;
+enum class ValueTiming : uint8_t { COMPILE_TIME, RUNTIME };
+
+enum class StorageClass : uint8_t {
+  AUTOMATIC, // default local variable
+  STATIC,    // static storage duration, internal linkage (per TU)
+  EXTERN,    // external linkage, defined elsewhere
+  REGISTER,  // hint only, rarely respected by modern backends
+  THREAD_LOCAL,
 };
 
-struct DeclarationData {
-  DATA_TYPES    data_type = DATA_TYPES::VOID;
-  VARIABLE_TYPE decl_type = VARIABLE_TYPE::COMPILE;
-
-  std::string value;
+enum class SymbolKind {
+  VARIABLE,
+  FUNCTION_PARAMETER,
+  FUNCTION,
+  STRUCT_TYPE,
+  ENUM_TYPE,
+  ENUM_CONSTANT,
+  TYPE_ALIAS,
+  NAMESPACE,
 };
+
+struct SourceLocation {
+  uint32_t line   = 0;
+  uint32_t column = 0;
+};
+
+struct DataType {
+  TypeKind      kind           = TypeKind::PRIMITIVE;
+  PrimitiveType primitive_type = PrimitiveType::VOID; // valid iff kind == PRIMITIVE
+
+  std::string_view type_name;
+
+  bool is_const    = false;
+  bool is_volatile = false;
+  bool is_signed   = true; // relevant for integer PrimitiveType
+
+  std::shared_ptr<DataType> pointee;
+
+  std::optional<size_t> array_length; // nullopt = unsized, e.g. int[]
+
+  std::shared_ptr<DataType>              return_type;
+  std::vector<std::shared_ptr<DataType>> parameter_types;
+  bool                                   is_variadic = false;
+
+  std::optional<uint32_t> definition_symbol_id;
+
+  size_t size_in_bytes = 0;
+  size_t alignment     = 0;
+
+  bool
+  operator==(const DataType& other) const;
+  bool
+  operator!=(const DataType& other) const {
+    return !(*this == other);
+  }
+};
+
+using ConstantValue = std::variant<std::monostate, // no value / not a constant
+                                   int64_t,
+                                   double,
+                                   bool,
+                                   char,
+                                   std::string>;
+
+struct StructMember {
+  std::string    name;
+  DataType       type;
+  size_t         byte_offset = 0;
+  SourceLocation location;
+};
+
+struct StructDefinition {
+  std::string               name;
+  std::vector<StructMember> members;
+  size_t                    size_in_bytes = 0;
+  size_t                    alignment     = 0;
+  SourceLocation            location;
+};
+
+struct EnumConstant {
+  std::string    name;
+  int64_t        value = 0;
+  SourceLocation location;
+};
+
+struct EnumDefinition {
+  std::string               name;
+  PrimitiveType             underlying_type = PrimitiveType::INT;
+  std::vector<EnumConstant> constants;
+  SourceLocation            location;
+};
+
+struct Declaration {
+  DataType     type;
+  ValueTiming  timing  = ValueTiming::RUNTIME;
+  StorageClass storage = StorageClass::AUTOMATIC;
+
+  ConstantValue initial_value; // monostate if uninitialized / not constant
+  bool          is_initialized = false;
+
+  SourceLocation location;
+};
+
 struct SymbolEntry {
-  DATA_TYPES    data_type = DATA_TYPES::VOID;
-  VARIABLE_TYPE decl_type = VARIABLE_TYPE::COMPILE;
+  std::string name; // symbol table maps are often keyed by name too,
+                    // but keep it here for standalone use (diagnostics,
+                    // iteration, "previous declaration was here" etc.)
+  SymbolKind kind = SymbolKind::VARIABLE;
 
-  std::string value;
+  Declaration declaration;
 
-  int64_t stack_offset = 0;
+  // --- Scope / codegen bookkeeping ---
+  uint32_t scope_id     = 0; // which lexical scope this belongs to
+  int64_t  stack_offset = 0; // valid for RUNTIME locals
 
-  uint32_t scope_label = 0;
+  // --- Diagnostics / lints ---
+  bool is_used = false;
+
+  SourceLocation location;
+};
+
+struct FunctionParameter {
+  std::string    name;
+  DataType       type;
+  SourceLocation location;
 };
 
 struct FunctionEntry {
-  std::string             name; // actual function name
-  DATA_TYPES              return_type = DATA_TYPES::VOID;
-  std::vector<DATA_TYPES> param_types;
-  bool                    is_defined  = false;
-  bool                    is_variadic = false;
+  std::string                    name; // unqualified function name
+  std::shared_ptr<DataType>      return_type;
+  std::vector<FunctionParameter> parameters;
+  bool                           is_variadic = false;
+  bool                           is_defined  = false; // has a body, vs. just declared
+  bool                           is_used     = false;
+
+  uint32_t       scope_id = 0; // scope the function body introduces
+  SourceLocation location;
 };
 
-inline DATA_TYPES
+inline PrimitiveType
 get_datatypes(const std::string_view keyword) {
-  constexpr static std::pair<std::string, DATA_TYPES> m_datatype_map[] = {
-      {"int", DATA_TYPES::INT},
-      {"void", DATA_TYPES::VOID},
-      {"char", DATA_TYPES::CHAR},
-      {"float", DATA_TYPES::FLOAT},
-      {"bool", DATA_TYPES::BOOL},
+  constexpr static std::pair<std::string, PrimitiveType> m_datatype_map[] = {
+      {"int", PrimitiveType::INT},
+      {"void", PrimitiveType::VOID},
+      {"char", PrimitiveType::CHAR},
+      {"float", PrimitiveType::FLOAT},
+      {"bool", PrimitiveType::BOOL},
   };
   for (const auto& [view, data_type] : m_datatype_map) {
     if (view == keyword) {
       return data_type;
     }
   }
-  return DATA_TYPES::USER_DEFINED;
+  return PrimitiveType::USER_DEFINED;
 }
 //
-// using DC_VALUE = uint16_t;
-// enum class DATATYPE_COMPATIBILITY : DC_VALUE {
-//   NONE = 0,
-//   INT_LITERAL = 1 << 0,
-//   FLOAT_LITERAL = 1 << 1,
-//   HEX_LITERAL = 1 << 2,
-//   BINARY_LITERAL = 1 << 3,
-//   STRING_LITERAL = 1 << 4,
-//   CHAR_LITERAL = 1 << 5,
-//   BOOL_LITERAL = 1 << 6,
-// };
-//
-// inline DATATYPE_COMPATIBILITY
-// operator|(DATATYPE_COMPATIBILITY lhs,
-//           DATATYPE_COMPATIBILITY rhs) {
-//   return DATATYPE_COMPATIBILITY((DC_VALUE)lhs | (DC_VALUE)rhs);
-// }
-//
-// (DATA_TYPES::INT, AG::INT_LITERAL) let x : int = 10;
-// let str : string = "Hello World!";
-// string -> AG_KEYWORD(string) DATA_TYPES::STRING
-// TokenName::AG_STRING_LITERAL -> DATATYPE_COMPATIBILITY::STRING_LITERAL
-// DATA_TYPES::STRING -> STRING_LITERAL
-// AG_KEYWORD("string"), AG_STRING_LIRERAL
-// inline bool is_compatible()
-//
-// inline DATATYPE_COMPATIBILITY
-// get_datatype_compatability(DATA_TYPES data_types) {
-//   using DC = DATATYPE_COMPATIBILITY;
-//   switch (data_types) {
-//   case ag::DATA_TYPES::INT: {
-//     return DC::INT_LITERAL | DC::BINARY_LITERAL | DC::HEX_LITERAL;
-//   }
-//
-//   case ag::DATA_TYPES::FLOAT: {
-//     return DC::INT_LITERAL | DC::BINARY_LITERAL | DC::HEX_LITERAL |
-//            DC::FLOAT_LITERAL;
-//   }
-//
-//   case DATA_TYPES::STRING: {
-//     return DC::STRING_LITERAL | DC::CHAR_LITERAL;
-//   }
-//
-//   case DATA_TYPES::CHAR: {
-//     return DC::CHAR_LITERAL;
-//   }
-//
-//   case DATA_TYPES::BOOL: {
-//     return DC::BOOL_LITERAL | DC::INT_LITERAL | DC::BINARY_LITERAL |
-//            DC::HEX_LITERAL;
-//   }
-//
-//   default:
-//     return DATATYPE_COMPATIBILITY::NONE;
-//   }
-// }
-//
-// // bool
-// // is_compatible()
+using DC_VALUE = uint16_t;
+enum class DATATYPE_COMPATIBILITY : DC_VALUE {
+  NONE           = 0,
+  INT_LITERAL    = 1 << 0,
+  FLOAT_LITERAL  = 1 << 1,
+  HEX_LITERAL    = 1 << 2,
+  BINARY_LITERAL = 1 << 3,
+  STRING_LITERAL = 1 << 4,
+  CHAR_LITERAL   = 1 << 5,
+  BOOL_LITERAL   = 1 << 6,
+};
+
+inline DATATYPE_COMPATIBILITY
+get_datatype_compatability_from_primary_type(PRIMARY_TYPE pri_type) {
+  switch (pri_type) {
+  case ag::PRIMARY_TYPE::INT_LITERAL:
+    return DATATYPE_COMPATIBILITY::INT_LITERAL;
+  // case TokenName::AG_BINARY_LITERAL:
+  //   return DATATYPE_COMPATIBILITY::BINARY_LITERAL;
+  default:
+    break;
+  }
+  return DATATYPE_COMPATIBILITY::NONE;
+}
+
+inline DATATYPE_COMPATIBILITY
+operator|(DATATYPE_COMPATIBILITY lhs,
+          DATATYPE_COMPATIBILITY rhs) {
+  return DATATYPE_COMPATIBILITY((DC_VALUE)lhs | (DC_VALUE)rhs);
+}
+
+inline DATATYPE_COMPATIBILITY
+get_datatype_compatability(PrimitiveType data_types) {
+  using DC = DATATYPE_COMPATIBILITY;
+  switch (data_types) {
+  case ag::PrimitiveType::INT: {
+    return DC::INT_LITERAL | DC::BINARY_LITERAL | DC::HEX_LITERAL;
+  }
+
+  case PrimitiveType::CHAR: {
+    return DC::CHAR_LITERAL;
+  }
+
+  case PrimitiveType::BOOL: {
+    return DC::BOOL_LITERAL | DC::INT_LITERAL | DC::BINARY_LITERAL | DC::HEX_LITERAL;
+  }
+
+  default:
+    return DATATYPE_COMPATIBILITY::NONE;
+  }
+}
+inline bool
+is_compatible_datatype(PrimitiveType type,
+                       PRIMARY_TYPE  pri_type) {
+  auto token_2_datatype  = get_datatype_compatability_from_primary_type(pri_type);
+  auto is_compatible_for = get_datatype_compatability(type);
+  return static_cast<DC_VALUE>(token_2_datatype) & static_cast<DC_VALUE>(is_compatible_for);
+}
 
 inline int
 stoi(const std::string& str) {
@@ -155,4 +273,9 @@ class Parser;
 void
 print_error(const std::string_view error,
             const Parser&          parser);
+
+void
+print_error(const std::string_view error,
+            const Parser&          parser,
+            const SourceLocation&  location);
 } // namespace ag

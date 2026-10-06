@@ -16,6 +16,9 @@ public:
   virtual void
   generate(CodeGenContext& context) override;
 
+  virtual bool
+  analyze_semantics(Parser& parser) override;
+
 private:
   std::vector<AG_scope<Statements>> m_statements;
 };

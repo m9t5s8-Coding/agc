@@ -4,6 +4,7 @@
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 // #include "SymbolTable.hpp"
+#include "SymbolTable.hpp"
 #include "Token.hpp"
 #include <iostream>
 
@@ -28,4 +29,18 @@ BodyStatement::ParseBlock(Parser& parser) {
 
 void
 BodyStatement::generate(CodeGenContext& context) {}
+
+bool
+BodyStatement::analyze_semantics(Parser& parser) {
+  get_symbol_table().enter_scope();
+
+  for (const auto& stmt : m_statements) {
+    if (!stmt->analyze_semantics(parser)) {
+      return false;
+    }
+  }
+
+  get_symbol_table().exit_scope();
+  return true;
+}
 } // namespace ag

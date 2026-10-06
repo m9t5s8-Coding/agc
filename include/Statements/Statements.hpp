@@ -34,7 +34,7 @@ struct CodeGenContext {
 };
 
 enum class EXPR_TYPE { LITERAL, IDENTIFIER, COMPLEX_RUNTIME };
-
+class Parser;
 class Statements {
 public:
   Statements() {}
@@ -42,6 +42,9 @@ public:
 
   virtual void
   generate(CodeGenContext&) = 0;
+
+  virtual bool
+  analyze_semantics(Parser&) = 0;
 };
 
 } // namespace ag

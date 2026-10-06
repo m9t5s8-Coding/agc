@@ -26,8 +26,13 @@ public:
   virtual void
   generate(CodeGenContext&) override;
 
+  virtual bool
+  analyze_semantics(Parser& parser) override {
+    return m_function_body->analyze_semantics(parser);
+  }
+
   void
-  add_parameter(FunctionParam& param) {
+  add_parameter(FunctionParameter& param) {
     m_parameters.emplace_back(std::move(param));
   }
 
@@ -37,11 +42,11 @@ public:
   }
 
 private:
-  using FunctionParameter = std::vector<FunctionParam>;
+  using FunctionParameterVec = std::vector<FunctionParameter>;
 
   std::string          m_function_name;
-  FunctionParameter    m_parameters;
-  DataType_Data        m_return_type;
+  FunctionParameterVec m_parameters;
+  DataType             m_return_type;
   AG_scope<Statements> m_function_body;
   bool                 is_declaration = false;
 };

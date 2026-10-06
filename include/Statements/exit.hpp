@@ -14,6 +14,9 @@ public:
   virtual void
   generate(CodeGenContext&) override;
 
+  virtual bool
+  analyze_semantics(Parser& parser) override;
+
 private:
   AG_scope<Expression> exit_expr;
 };

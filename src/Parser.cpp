@@ -15,6 +15,7 @@
 #include "Token.hpp"
 
 #include <fstream>
+#include <iostream>
 
 namespace ag {
 void
@@ -30,6 +31,12 @@ Parser::parse() {
   if (m_invalid_syntax) {
     return;
   }
+
+  for (const auto& ptr : m_statements) {
+    ptr->analyze_semantics(*this);
+  }
+
+  return;
 
   CodeGenContext context;
   context.text << "_start:\n";

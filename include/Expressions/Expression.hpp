@@ -42,6 +42,13 @@ enum class UN_OPERATOR {
   NONE,
 };
 
+enum class PRIMARY_TYPE {
+  INT_LITERAL,
+  STRING_LITERAL,
+  IDENTIFIER,
+  VOID,
+};
+
 class Parser;
 class Expression {
 public:
@@ -54,6 +61,11 @@ public:
   static AG_scope<Expression>
   parse_pratt(Parser&,
               float min_bp);
+
+  virtual PRIMARY_TYPE
+  get_type() {
+    return PRIMARY_TYPE::VOID;
+  }
 };
 
 class BinaryExpression : public Expression {
@@ -75,6 +87,11 @@ public:
   static AG_scope<Expression>
   parse_binary(Parser&);
 
+  virtual PRIMARY_TYPE
+  get_type() override {
+    return PRIMARY_TYPE::VOID;
+  }
+
   BIN_OPERATOR         bin_operator = BIN_OPERATOR::NONE;
   AG_scope<Expression> left;
   AG_scope<Expression> right;
@@ -92,6 +109,11 @@ public:
   parse_postfix(Parser&,
                 AG_scope<Expression>);
 
+  virtual PRIMARY_TYPE
+  get_type() override {
+    return PRIMARY_TYPE::VOID;
+  }
+
   AG_scope<Expression> operand;
   UN_OPERATOR          un_operator;
 };
@@ -101,9 +123,19 @@ public:
   static AG_scope<Expression>
   parse_primary(Parser& parser);
 
+  std::string_view
+  get_value() {
+    return value;
+  }
+
+  virtual PRIMARY_TYPE
+  get_type() override {
+    return primary_type;
+  }
+
 private:
   std::string_view value;
-  enum class PRIMARY_TYPE { INT_LITERAL, STRING_LITERAL, IDENTIFIER, NONE } primary_type = PRIMARY_TYPE::NONE;
+  PRIMARY_TYPE     primary_type = PRIMARY_TYPE::VOID;
 };
 
 class MemberExpression : public Expression {
@@ -115,6 +147,11 @@ public:
   static AG_scope<Expression>
   parse(Parser&              parser,
         AG_scope<Expression> object);
+
+  virtual PRIMARY_TYPE
+  get_type() override {
+    return PRIMARY_TYPE::VOID;
+  }
 };
 
 class CallExpression : public Expression {
@@ -125,6 +162,11 @@ public:
   static AG_scope<Expression>
   parse(Parser&              parser,
         AG_scope<Expression> callee);
+
+  virtual PRIMARY_TYPE
+  get_type() override {
+    return PRIMARY_TYPE::VOID;
+  }
 };
 
 class IndexExpression : public Expression {
@@ -135,6 +177,11 @@ public:
   static AG_scope<Expression>
   parse(Parser&              parser,
         AG_scope<Expression> object);
+
+  virtual PRIMARY_TYPE
+  get_type() {
+    return PRIMARY_TYPE::VOID;
+  }
 };
 
 } // namespace ag

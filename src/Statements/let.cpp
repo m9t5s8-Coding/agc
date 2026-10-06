@@ -2,6 +2,8 @@
 #include "Expressions/Expression.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
+#include "Statements/Utils.hpp"
+#include "SymbolTable.hpp"
 #include "error_msg.hpp"
 #include "macro.hpp"
 
@@ -10,7 +12,8 @@ AG_scope<Statements>
 LetStatement::ParseLet(Parser& parser) {
   parser.advance();
 
-  auto let_stmt = AG_cscope<LetStatement>();
+  auto let_stmt             = AG_cscope<LetStatement>();
+  let_stmt->m_location.line = parser.current_token().line;
 
   AG_EXPECT_GET_ID_OR_RETURN(
       parser, ag::error::ExpectedIdentifier, let_stmt->m_name, nullptr, TokenName::AG_IDENTIFIER);
@@ -24,6 +27,8 @@ LetStatement::ParseLet(Parser& parser) {
                                 TokenName::AG_KEYWORD,
                                 TokenName::AG_IDENTIFIER);
 
+  let_stmt->m_datatype.is_const = true;
+
   if (parser.match(TokenName::AG_ASSIGN)) {
     AG_PARSE_EXPRESSION_OR_RETURN(parser, let_stmt->m_expr, nullptr);
   }
@@ -35,4 +40,19 @@ LetStatement::ParseLet(Parser& parser) {
 
 void
 LetStatement::generate(CodeGenContext& context) {}
+
+bool
+LetStatement::analyze_semantics(Parser& parser) {
+  // let x : int = 3;
+
+  // SymbolTable add -> Paila Define -> int -> 3(valid)
+
+  if (!is_compatible_datatype(m_datatype.primitive_type, m_expr->get_type())) {
+    print_error(error::InvalidBinaryLiteral, parser, m_location);
+    return false;
+  }
+
+  return true;
+}
+
 } // namespace ag

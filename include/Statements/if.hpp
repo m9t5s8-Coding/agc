@@ -15,6 +15,11 @@ public:
   virtual void
   generate(CodeGenContext&) override;
 
+  virtual bool
+  analyze_semantics(Parser& parser) override {
+    return true;
+  }
+
 private:
   AG_scope<Expression> m_condition;
   AG_scope<Statements> m_if_body;

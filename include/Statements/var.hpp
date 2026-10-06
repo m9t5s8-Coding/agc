@@ -16,8 +16,13 @@ public:
   virtual void
   generate(CodeGenContext& context) override;
 
+  virtual bool
+  analyze_semantics(Parser& parser) override {
+    return true;
+  }
+
 private:
-  DataType_Data        m_datatype;
+  DataType             m_datatype;
   std::string_view     m_name;
   AG_scope<Expression> m_expr;
 };

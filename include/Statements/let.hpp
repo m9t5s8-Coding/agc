@@ -15,9 +15,13 @@ public:
   virtual void
   generate(CodeGenContext& context) override;
 
+  virtual bool
+  analyze_semantics(Parser& parser) override;
+
 private:
-  DataType_Data        m_datatype;
+  DataType             m_datatype;
   std::string_view     m_name;
   AG_scope<Expression> m_expr;
+  SourceLocation       m_location;
 };
 } // namespace ag

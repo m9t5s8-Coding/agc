@@ -11,27 +11,23 @@
 
 namespace ag {
 
-static std::optional<std::vector<FunctionParam>>
+static std::optional<std::vector<FunctionParameter>>
 parse_function_parameter(Parser& parser) {
-  std::vector<FunctionParam> l_parameters;
+  std::vector<FunctionParameter> l_parameters;
 
   if (parser.match(TokenName::AG_RIGHT_PAREN))
     return l_parameters;
 
-  FunctionParam param;
+  FunctionParameter param;
   while (parser.is_valid()) {
 
     AG_EXPECT_GET_ID_OR_RETURN(
-        parser, ag::error::ExpectedFunctionName, param.variable_name, std::nullopt, TokenName::AG_IDENTIFIER);
+        parser, ag::error::ExpectedFunctionName, param.name, std::nullopt, TokenName::AG_IDENTIFIER);
 
     AG_EXPECT_OR_RETURN(parser, TokenName::AG_COLON, ag::error::ExpectedColon, std::nullopt);
 
-    AG_EXPECT_GET_VALUE_OR_RETURN(parser,
-                                  ag::error::ExpectedKeyword,
-                                  param.data_type,
-                                  std::nullopt,
-                                  TokenName::AG_KEYWORD,
-                                  TokenName::AG_IDENTIFIER);
+    AG_EXPECT_GET_VALUE_OR_RETURN(
+        parser, ag::error::ExpectedKeyword, param.type, std::nullopt, TokenName::AG_KEYWORD, TokenName::AG_IDENTIFIER);
 
     l_parameters.push_back(param);
     if (!parser.match(TokenName::AG_COMMA))
@@ -42,9 +38,9 @@ parse_function_parameter(Parser& parser) {
   return l_parameters;
 }
 
-static std::optional<DataType_Data>
+static std::optional<DataType>
 parse_return_type(Parser& parser) {
-  DataType_Data out_value;
+  DataType out_value;
   AG_EXPECT_GET_VALUE_OR_RETURN(
       parser, ag::error::ExpectedKeyword, out_value, std::nullopt, TokenName::AG_KEYWORD, TokenName::AG_IDENTIFIER);
   return out_value;
