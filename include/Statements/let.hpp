@@ -22,6 +22,5 @@ private:
   DataType             m_datatype;
   std::string_view     m_name;
   AG_scope<Expression> m_expr;
-  SourceLocation       m_location;
 };
 } // namespace ag

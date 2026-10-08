@@ -17,9 +17,7 @@ public:
   generate(CodeGenContext& context) override;
 
   virtual bool
-  analyze_semantics(Parser& parser) override {
-    return true;
-  }
+  analyze_semantics(Parser& parser) override;
 
 private:
   DataType             m_datatype;

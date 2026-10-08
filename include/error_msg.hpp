@@ -143,6 +143,7 @@ inline constexpr std::string_view MissingReturnStatement  = "\"Missing return st
 inline constexpr std::string_view UnreachableCode         = "\"Unreachable code\"";
 inline constexpr std::string_view ImmutableAssignment     = "\"Cannot assign to immutable variable\"";
 inline constexpr std::string_view UseOfUninitialized      = "\"Use of uninitialized variable\"";
+inline constexpr std::string_view UseOfUndefined          = "\"Use of undefined variable\"";
 inline constexpr std::string_view InvalidOperandTypes     = "\"Invalid operand types\"";
 inline constexpr std::string_view DivisionByZero          = "\"Division by zero\"";
 inline constexpr std::string_view IndexOutOfBounds        = "\"Index out of bounds\"";

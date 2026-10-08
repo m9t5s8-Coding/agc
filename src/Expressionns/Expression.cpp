@@ -1,9 +1,12 @@
 #include "Expressions/Expression.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
+#include "Statements/Utils.hpp"
+#include "SymbolTable.hpp"
 #include "Token.hpp"
 #include "error_msg.hpp"
 #include <initializer_list>
+#include <iostream>
 
 namespace ag {
 static UN_OPERATOR
@@ -212,17 +215,59 @@ PrimaryExpression::parse_primary(Parser& parser) {
   }
   auto primary_exp = AG_cscope<PrimaryExpression>();
   if (temp_token == TokenName::AG_STRING_LITERAL) {
-    primary_exp->primary_type = PRIMARY_TYPE::STRING_LITERAL;
+    primary_exp->primary_type = PrimitiveType::STRING;
     primary_exp->value        = parser.current_token().value;
   } else if (temp_token == TokenName::AG_INT_LITERAL) {
-    primary_exp->primary_type = PRIMARY_TYPE::INT_LITERAL;
+    primary_exp->primary_type = PrimitiveType::INT;
     primary_exp->value        = parser.current_token().value;
   } else if (temp_token == TokenName::AG_IDENTIFIER) {
-    primary_exp->primary_type = PRIMARY_TYPE::IDENTIFIER;
+    primary_exp->primary_type = PrimitiveType::IDENTIFIER;
     primary_exp->value        = parser.current_token().value;
   }
   parser.advance();
   return primary_exp;
+}
+
+PrimitiveType
+Expression::get_type() {
+  return PrimitiveType::VOID;
+}
+
+PrimitiveType
+BinaryExpression::get_type() {
+  return PrimitiveType::VOID;
+}
+
+PrimitiveType
+UniaryExpression::get_type() {
+  return PrimitiveType::VOID;
+}
+
+PrimitiveType
+MemberExpression::get_type() {
+  return PrimitiveType::VOID;
+}
+
+PrimitiveType
+IndexExpression::get_type() {
+  return PrimitiveType::VOID;
+}
+
+PrimitiveType
+CallExpression::get_type() {
+  return PrimitiveType::VOID;
+}
+
+PrimitiveType
+PrimaryExpression::get_type() {
+  if (primary_type == PrimitiveType::IDENTIFIER) {
+    auto data = get_symbol_table().lookup(value);
+    if (!data) {
+      return PrimitiveType::UNEXPECTED;
+    }
+    return data->type.primitive_type;
+  }
+  return primary_type;
 }
 
 AG_scope<Expression>

@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Expressions/Expression.hpp"
-#include "Token.hpp"
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -12,15 +10,7 @@
 
 namespace ag {
 
-enum class PrimitiveType {
-  VOID,
-  INT,
-  FLOAT,
-  DOUBLE,
-  CHAR,
-  BOOL,
-  USER_DEFINED,
-};
+enum class PrimitiveType { VOID, INT, FLOAT, DOUBLE, CHAR, STRING, BOOL, USER_DEFINED, IDENTIFIER, UNEXPECTED };
 
 enum class TypeKind {
   PRIMITIVE,
@@ -201,19 +191,6 @@ enum class DATATYPE_COMPATIBILITY : DC_VALUE {
 };
 
 inline DATATYPE_COMPATIBILITY
-get_datatype_compatability_from_primary_type(PRIMARY_TYPE pri_type) {
-  switch (pri_type) {
-  case ag::PRIMARY_TYPE::INT_LITERAL:
-    return DATATYPE_COMPATIBILITY::INT_LITERAL;
-  // case TokenName::AG_BINARY_LITERAL:
-  //   return DATATYPE_COMPATIBILITY::BINARY_LITERAL;
-  default:
-    break;
-  }
-  return DATATYPE_COMPATIBILITY::NONE;
-}
-
-inline DATATYPE_COMPATIBILITY
 operator|(DATATYPE_COMPATIBILITY lhs,
           DATATYPE_COMPATIBILITY rhs) {
   return DATATYPE_COMPATIBILITY((DC_VALUE)lhs | (DC_VALUE)rhs);
@@ -241,9 +218,9 @@ get_datatype_compatability(PrimitiveType data_types) {
 }
 inline bool
 is_compatible_datatype(PrimitiveType type,
-                       PRIMARY_TYPE  pri_type) {
-  auto token_2_datatype  = get_datatype_compatability_from_primary_type(pri_type);
+                       PrimitiveType pri_type) {
   auto is_compatible_for = get_datatype_compatability(type);
+  auto token_2_datatype  = get_datatype_compatability(pri_type);
   return static_cast<DC_VALUE>(token_2_datatype) & static_cast<DC_VALUE>(is_compatible_for);
 }
 

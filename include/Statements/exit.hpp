@@ -1,5 +1,6 @@
 #pragma once
 #include "Statements/Statements.hpp"
+#include "Statements/Utils.hpp"
 
 namespace ag {
 class Expression;
@@ -18,6 +19,6 @@ public:
   analyze_semantics(Parser& parser) override;
 
 private:
-  AG_scope<Expression> exit_expr;
+  AG_scope<Expression> m_exit_expr;
 };
 } // namespace ag

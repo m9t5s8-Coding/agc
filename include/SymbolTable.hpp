@@ -27,28 +27,13 @@ public:
     if (find(key)) {
       return false;
     }
-
-    // SymbolEntry entry;
-    // entry.data_type   = decl_type.data_type;
-    // entry.decl_type   = decl_type.decl_type;
-    // entry.scope_label = s_current_scope;
-    //
-    // m_current_stack_offset += 8;
-    // entry.stack_offset = m_current_stack_offset;
-    //
-    // if (decl_type.decl_type == VARIABLE_TYPE::COMPILE) {
-    //   if (decl_type.data_type.datatype_type == DATA_TYPES::CHAR) {
-    //     entry.value = decl_type.value;
-    //   } else {
-    //   }
-    // }
-    //
-    // m_scopes.back()[key] = entry;
+    auto& map = m_scopes.back().first;
+    map[key]  = decl_type;
     return true;
   }
 
   // 0 1 2
-  std::optional<SymbolEntry>
+  std::optional<Declaration>
   lookup(const std::string_view key) {
     for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); ++it) {
       if (it->second) {
@@ -82,7 +67,7 @@ public:
   get_symbol_table();
 
 private:
-  using SymbolTableVector = std::vector<std::pair<std::unordered_map<std::string_view, SymbolEntry>, bool>>;
+  using SymbolTableVector = std::vector<std::pair<std::unordered_map<std::string_view, Declaration>, bool>>;
 
   SymbolTableVector     m_scopes;
   int64_t               m_current_stack_offset = 0;

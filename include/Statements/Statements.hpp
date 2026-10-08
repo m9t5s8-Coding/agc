@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Statements/Utils.hpp"
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -45,6 +46,9 @@ public:
 
   virtual bool
   analyze_semantics(Parser&) = 0;
+
+protected:
+  SourceLocation m_location;
 };
 
 } // namespace ag

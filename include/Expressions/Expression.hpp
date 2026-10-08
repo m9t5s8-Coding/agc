@@ -1,5 +1,6 @@
 #pragma once
 #include "Statements/Statements.hpp"
+#include "Statements/Utils.hpp"
 #include <vector>
 
 namespace ag {
@@ -42,12 +43,7 @@ enum class UN_OPERATOR {
   NONE,
 };
 
-enum class PRIMARY_TYPE {
-  INT_LITERAL,
-  STRING_LITERAL,
-  IDENTIFIER,
-  VOID,
-};
+enum class PrimitiveType;
 
 class Parser;
 class Expression {
@@ -62,10 +58,8 @@ public:
   parse_pratt(Parser&,
               float min_bp);
 
-  virtual PRIMARY_TYPE
-  get_type() {
-    return PRIMARY_TYPE::VOID;
-  }
+  virtual PrimitiveType
+  get_type();
 };
 
 class BinaryExpression : public Expression {
@@ -87,10 +81,8 @@ public:
   static AG_scope<Expression>
   parse_binary(Parser&);
 
-  virtual PRIMARY_TYPE
-  get_type() override {
-    return PRIMARY_TYPE::VOID;
-  }
+  virtual PrimitiveType
+  get_type() override;
 
   BIN_OPERATOR         bin_operator = BIN_OPERATOR::NONE;
   AG_scope<Expression> left;
@@ -109,10 +101,8 @@ public:
   parse_postfix(Parser&,
                 AG_scope<Expression>);
 
-  virtual PRIMARY_TYPE
-  get_type() override {
-    return PRIMARY_TYPE::VOID;
-  }
+  virtual PrimitiveType
+  get_type() override;
 
   AG_scope<Expression> operand;
   UN_OPERATOR          un_operator;
@@ -128,14 +118,12 @@ public:
     return value;
   }
 
-  virtual PRIMARY_TYPE
-  get_type() override {
-    return primary_type;
-  }
+  virtual PrimitiveType
+  get_type() override;
 
 private:
   std::string_view value;
-  PRIMARY_TYPE     primary_type = PRIMARY_TYPE::VOID;
+  PrimitiveType    primary_type;
 };
 
 class MemberExpression : public Expression {
@@ -148,10 +136,8 @@ public:
   parse(Parser&              parser,
         AG_scope<Expression> object);
 
-  virtual PRIMARY_TYPE
-  get_type() override {
-    return PRIMARY_TYPE::VOID;
-  }
+  virtual PrimitiveType
+  get_type() override;
 };
 
 class CallExpression : public Expression {
@@ -163,10 +149,8 @@ public:
   parse(Parser&              parser,
         AG_scope<Expression> callee);
 
-  virtual PRIMARY_TYPE
-  get_type() override {
-    return PRIMARY_TYPE::VOID;
-  }
+  virtual PrimitiveType
+  get_type() override;
 };
 
 class IndexExpression : public Expression {
@@ -178,10 +162,8 @@ public:
   parse(Parser&              parser,
         AG_scope<Expression> object);
 
-  virtual PRIMARY_TYPE
-  get_type() {
-    return PRIMARY_TYPE::VOID;
-  }
+  virtual PrimitiveType
+  get_type() override;
 };
 
 } // namespace ag

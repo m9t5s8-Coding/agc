@@ -44,11 +44,24 @@ LetStatement::generate(CodeGenContext& context) {}
 bool
 LetStatement::analyze_semantics(Parser& parser) {
   // let x : int = 3;
+  Declaration data;
+  data.type     = m_datatype;
+  data.timing   = ValueTiming::COMPILE_TIME;
+  data.location = m_location;
+  if (!get_symbol_table().insert(m_name, data)) {
+    print_error(error::RedefinitionOfSymbol, parser, m_location);
+    return false;
+  }
 
-  // SymbolTable add -> Paila Define -> int -> 3(valid)
-
+  if (!m_expr)
+    return true;
+  auto type = m_expr->get_type();
+  if (type == PrimitiveType::UNEXPECTED) {
+    print_error(error::UseOfUndefined, parser, m_location);
+    return false;
+  }
   if (!is_compatible_datatype(m_datatype.primitive_type, m_expr->get_type())) {
-    print_error(error::InvalidBinaryLiteral, parser, m_location);
+    print_error(error::IncompatibleTypes, parser, m_location);
     return false;
   }
 
