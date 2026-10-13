@@ -1,4 +1,5 @@
 #pragma once
+#include "Statements/Utils.hpp"
 #include <cstdint>
 #include <string_view>
 
@@ -116,5 +117,6 @@ struct Token {
   std::string_view value;
   std::uint32_t    line;
   uint32_t         column;
+  // SourceLocation   location; // TODO: single one
 };
 } // namespace ag

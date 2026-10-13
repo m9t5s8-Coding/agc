@@ -4,6 +4,7 @@
 #include "Statements/Utils.hpp"
 // #include "SymbolTable.hpp"
 #include "Statements/body.hpp"
+#include "SymbolTable.hpp"
 #include "Token.hpp"
 #include "error_msg.hpp"
 #include "macro.hpp"
@@ -21,6 +22,7 @@ parse_function_parameter(Parser& parser) {
   FunctionParameter param;
   while (parser.is_valid()) {
 
+    param.location.line = parser.current_token().line;
     AG_EXPECT_GET_ID_OR_RETURN(
         parser, ag::error::ExpectedFunctionName, param.name, std::nullopt, TokenName::AG_IDENTIFIER);
 
@@ -87,6 +89,25 @@ FunctionStatement::ParseFunction(Parser& parser) {
   return function_stmt;
 }
 
+bool
+FunctionStatement::analyze_semantics(Parser& parser) {
+  get_symbol_table().enter_scope();
+  Declaration data;
+  for (const auto& param : m_parameters) {
+    data.type     = param.type;
+    data.timing   = ValueTiming::RUNTIME;
+    data.location = param.location;
+    if (!get_symbol_table().insert(param.name, data)) {
+      print_error(error::RedefinitionOfSymbol, parser, param.location);
+      return false;
+    }
+  }
+  auto return_val = m_function_body->analyze_semantics(parser);
+  get_symbol_table().exit_scope();
+  return return_val;
+}
+
 void
 FunctionStatement::generate(CodeGenContext& context) {}
+
 } // namespace ag

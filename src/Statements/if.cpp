@@ -26,4 +26,12 @@ IfStatement::ParseIf(Parser& parser) {
 void
 IfStatement::generate(CodeGenContext&) {}
 
+bool
+IfStatement::analyze_semantics(Parser& parser) {
+
+  // condition
+  auto return_val = m_if_body->analyze_semantics(parser);
+  return return_val && m_else_body->analyze_semantics(parser);
+}
+
 } // namespace ag

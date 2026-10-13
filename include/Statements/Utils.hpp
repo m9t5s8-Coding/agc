@@ -169,6 +169,7 @@ get_datatypes(const std::string_view keyword) {
       {"char", PrimitiveType::CHAR},
       {"float", PrimitiveType::FLOAT},
       {"bool", PrimitiveType::BOOL},
+      {"string", PrimitiveType::STRING},
   };
   for (const auto& [view, data_type] : m_datatype_map) {
     if (view == keyword) {
@@ -206,6 +207,10 @@ get_datatype_compatability(PrimitiveType data_types) {
 
   case PrimitiveType::CHAR: {
     return DC::CHAR_LITERAL;
+  }
+
+  case PrimitiveType::STRING: {
+    return DC::STRING_LITERAL;
   }
 
   case PrimitiveType::BOOL: {

@@ -16,9 +16,7 @@ public:
   generate(CodeGenContext& context) override;
 
   virtual bool
-  analyze_semantics(Parser& parser) override {
-    return true;
-  }
+  analyze_semantics(Parser& parser) override;
 
 private:
   AG_scope<Expression> m_buffer;

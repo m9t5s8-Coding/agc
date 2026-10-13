@@ -27,9 +27,7 @@ public:
   generate(CodeGenContext&) override;
 
   virtual bool
-  analyze_semantics(Parser& parser) override {
-    return m_function_body->analyze_semantics(parser);
-  }
+  analyze_semantics(Parser& parser) override;
 
   void
   add_parameter(FunctionParameter& param) {

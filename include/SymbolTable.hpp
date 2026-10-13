@@ -14,9 +14,13 @@ class SymbolTable {
 public:
   bool
   find(const std::string_view key) {
-    auto& map = m_scopes.back().first;
-    if (map.find(key) != map.end()) {
-      return true;
+    for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); ++it) {
+      if (it->second) {
+        auto& map = it->first;
+        if (map.find(key) != map.end()) {
+          return true;
+        }
+      }
     }
     return false;
   }
@@ -27,8 +31,12 @@ public:
     if (find(key)) {
       return false;
     }
-    auto& map = m_scopes.back().first;
-    map[key]  = decl_type;
+    for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); it++) {
+      if (it->second) {
+        auto& map = it->first;
+        map[key]  = decl_type;
+      }
+    }
     return true;
   }
 
@@ -56,7 +64,13 @@ public:
   void
   exit_scope() {
     // m_scopes.pop_back();
-    m_scopes.back().second = false;
+    // m_scopes.back().second = false;
+    for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); it++) {
+      if (it->second) {
+        it->second = false;
+        break;
+      }
+    }
   }
   void
   reset_stack_offset() {
