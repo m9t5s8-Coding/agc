@@ -6,6 +6,7 @@
 #include "SymbolTable.hpp"
 #include "error_msg.hpp"
 #include "macro.hpp"
+#include <iostream>
 
 namespace ag {
 AG_scope<Statements>
@@ -39,11 +40,16 @@ LetStatement::ParseLet(Parser& parser) {
 }
 
 void
-LetStatement::generate(CodeGenContext& context) {}
+LetStatement::generate(CodeGenContext& context) {
+  if (!m_expr)
+    return;
+
+  auto expr = m_expr->generate(context);
+  context.text << m_name << " = " << expr << '\n';
+}
 
 bool
 LetStatement::analyze_semantics(Parser& parser) {
-  // let x : int = 3;
   Declaration data;
   data.type     = m_datatype;
   data.timing   = ValueTiming::COMPILE_TIME;
@@ -52,14 +58,14 @@ LetStatement::analyze_semantics(Parser& parser) {
     print_error(error::RedefinitionOfSymbol, parser, m_location);
     return false;
   }
+  // let x : int = x + 1; TODO
 
   if (!m_expr)
     return true;
-  auto type = m_expr->get_type();
-  if (type == PrimitiveType::UNEXPECTED) {
-    print_error(error::UseOfUndefined, parser, m_location);
+  if (!m_expr->analyze_semantics(parser, m_location)) {
     return false;
   }
+  auto type = m_expr->get_type();
   if (!is_compatible_datatype(m_datatype.primitive_type, m_expr->get_type())) {
     print_error(error::IncompatibleTypes, parser, m_location);
     return false;

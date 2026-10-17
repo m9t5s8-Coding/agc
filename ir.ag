@@ -1,0 +1,29 @@
+func main() -> int {
+  # let r : int = (((1 + 2) * (9 - 4)) % 7 << 2) & 255 | (5 > 3 && 1 != 0);
+  let r : int = 10;
+  let x : int = 20;
+  r =  (((1 + 2) * (9 - 4)) % 7 << 2) & 255 | (5 > 3 && 1 != 0);
+  x = r = 10 = 20;
+
+  let str : string = "Hello World!";
+  read(str, x);
+  write(str, x);
+
+  return(10 - 2);
+  exit(r = 2);
+}
+
+# {
+#   {
+#     letstmt,
+#     assign,
+#     retstml,
+#   }
+# }
+
+# main():
+#   x = 10;
+#   x = 20;
+#   b1:
+#   return x;
+

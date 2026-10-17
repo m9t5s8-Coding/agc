@@ -31,7 +31,9 @@ struct CodeGenContext {
   std::stringstream data;
   std::stringstream bss;
 
-  uint32_t label = 0;
+  uint32_t label       = 0;
+  uint32_t temp_label  = 0;
+  uint32_t block_label = 0;
 };
 
 enum class EXPR_TYPE { LITERAL, IDENTIFIER, COMPLEX_RUNTIME };

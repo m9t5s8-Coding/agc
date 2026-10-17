@@ -26,15 +26,21 @@ ReturnStatement::ParseReturn(Parser& parser) {
 }
 
 void
-ReturnStatement::generate(CodeGenContext& context) {}
+ReturnStatement::generate(CodeGenContext& context) {
+  auto exp = m_return_expr->generate((context));
+  if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_return_expr.get());
+      bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
+    exp = bin_expr->left->generate(context);
+  }
+  context.text << "param " << exp << '\n' << "return\n";
+}
 
 bool
 ReturnStatement::analyze_semantics(Parser& parser) {
-  auto type = m_return_expr->get_type();
-  if (type == PrimitiveType::UNEXPECTED) {
-    print_error(error::UseOfUndefined, parser, m_location);
+  if (!m_return_expr->analyze_semantics(parser, m_location)) {
     return false;
   }
+  auto type = m_return_expr->get_type();
   if (!is_compatible_datatype(PrimitiveType::INT, type)) {
     print_error(error::IncompatibleTypes, parser, m_location);
     return false;

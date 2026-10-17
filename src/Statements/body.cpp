@@ -6,7 +6,6 @@
 // #include "SymbolTable.hpp"
 #include "SymbolTable.hpp"
 #include "Token.hpp"
-#include <iostream>
 
 namespace ag {
 AG_scope<Statements>
@@ -28,7 +27,11 @@ BodyStatement::ParseBlock(Parser& parser) {
 }
 
 void
-BodyStatement::generate(CodeGenContext& context) {}
+BodyStatement::generate(CodeGenContext& context) {
+  for (const auto& stmt : m_statements) {
+    stmt->generate(context);
+  }
+}
 
 bool
 BodyStatement::analyze_semantics(Parser& parser) {

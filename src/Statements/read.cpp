@@ -30,35 +30,46 @@ ReadStatement::ParseRead(Parser& parser) {
 
 bool
 ReadStatement::analyze_semantics(Parser& parser) {
-  auto type = m_buffer->get_type();
-  if (type == PrimitiveType::UNEXPECTED) {
-    print_error(error::UseOfUndefined, parser, m_location);
+  if (!m_buffer->analyze_semantics(parser, m_location)) {
     return false;
   }
+  auto type = m_buffer->get_type();
   if (!is_compatible_datatype(PrimitiveType::STRING, type)) {
     print_error(error::IncompatibleTypes, parser, m_location);
     return false;
   }
 
-  type = m_buffer_size->get_type();
-  if (type == PrimitiveType::UNEXPECTED) {
-    print_error(error::UseOfUndefined, parser, m_location);
+  if (!m_buffer_size->analyze_semantics(parser, m_location)) {
     return false;
   }
+  type = m_buffer_size->get_type();
   if (!is_compatible_datatype(PrimitiveType::INT, type)) {
     print_error(error::IncompatibleTypes, parser, m_location);
     return false;
   }
-
   return true;
 }
 
 void
 ReadStatement::generate(CodeGenContext& context) {
+  {
+    auto exp = m_buffer->generate((context));
+    if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_buffer.get());
+        bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
+      exp = bin_expr->left->generate(context);
+    }
+    context.text << "param " << exp << '\n';
+  }
+  {
+    auto exp = m_buffer_size->generate((context));
+    if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_buffer_size.get());
+        bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
+      exp = bin_expr->left->generate(context);
+    }
+    context.text << "param " << exp << '\n';
+  }
 
-  context.text << "lea rsi, [" << m_buffer << "]\n"
-               << "mov rdx, " << m_buffer_size << "\n"
-               << "call __ag_read\n";
+  context.text << "call __ag_read()\n";
 }
 
 } // namespace ag

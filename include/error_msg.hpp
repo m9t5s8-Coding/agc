@@ -139,6 +139,7 @@ inline constexpr std::string_view CannotInferType         = "\"Cannot infer type
 inline constexpr std::string_view InvalidArgumentCount    = "\"Invalid argument count\"";
 inline constexpr std::string_view InvalidArgumentType     = "\"Invalid argument type\"";
 inline constexpr std::string_view InvalidReturnType       = "\"Invalid return type\"";
+inline constexpr std::string_view InvalidAssignmentError  = "\"Invalid assignment error\"";
 inline constexpr std::string_view MissingReturnStatement  = "\"Missing return statement\"";
 inline constexpr std::string_view UnreachableCode         = "\"Unreachable code\"";
 inline constexpr std::string_view ImmutableAssignment     = "\"Cannot assign to immutable variable\"";

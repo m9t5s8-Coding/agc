@@ -10,7 +10,8 @@ AG_scope<Statements>
 WhileStatement::ParseWhile(Parser& parser) {
   parser.advance();
 
-  auto while_stmt = AG_cscope<WhileStatement>();
+  auto while_stmt             = AG_cscope<WhileStatement>();
+  while_stmt->m_location.line = parser.current_token().line;
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, error::ExpectedLeftParen, nullptr);
   AG_PARSE_EXPRESSION_OR_RETURN(parser, while_stmt->m_condition, nullptr);
@@ -22,5 +23,14 @@ WhileStatement::ParseWhile(Parser& parser) {
 }
 
 void
-WhileStatement::generate(CodeGenContext&) {}
+WhileStatement::generate(CodeGenContext& context) {}
+
+bool
+WhileStatement::analyze_semantics(Parser& parser) {
+  if (!m_condition->analyze_semantics(parser, m_location)) {
+    return false;
+  }
+  return m_while_body->analyze_semantics(parser);
+}
+
 } // namespace ag

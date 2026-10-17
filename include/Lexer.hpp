@@ -57,7 +57,7 @@ private:
   bool
   scan_char(const char c);
   void
-  create_stringn_literal();
+  create_string_literal();
   void
   create_char_literal();
 

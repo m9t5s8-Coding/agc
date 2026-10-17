@@ -3,7 +3,6 @@
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 // #include "SymbolTable.hpp"
-#include "Statements/body.hpp"
 #include "SymbolTable.hpp"
 #include "Token.hpp"
 #include "error_msg.hpp"
@@ -108,6 +107,8 @@ FunctionStatement::analyze_semantics(Parser& parser) {
 }
 
 void
-FunctionStatement::generate(CodeGenContext& context) {}
+FunctionStatement::generate(CodeGenContext& context) {
+  m_function_body->generate(context);
+}
 
 } // namespace ag

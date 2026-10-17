@@ -72,7 +72,7 @@ Lexer::scan_char(const char c) {
 
   case '"': {
     increase();
-    create_stringn_literal();
+    create_string_literal();
     return true;
   }
 
@@ -316,7 +316,7 @@ Lexer::create_keyword(const char c) {
 }
 
 void
-Lexer::create_stringn_literal() {
+Lexer::create_string_literal() {
   // auto is_ascii = [](const char c) {
   //   return c != '"' && c >= 32 && c <= 126;
   // };

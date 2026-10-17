@@ -10,7 +10,8 @@ AG_scope<Statements>
 IfStatement::ParseIf(Parser& parser) {
   parser.advance();
 
-  auto if_stmt = AG_cscope<IfStatement>();
+  auto if_stmt             = AG_cscope<IfStatement>();
+  if_stmt->m_location.line = parser.current_token().line;
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, error::ExpectedLeftParen, nullptr);
   AG_PARSE_EXPRESSION_OR_RETURN(parser, if_stmt->m_condition, nullptr);
@@ -28,9 +29,12 @@ IfStatement::generate(CodeGenContext&) {}
 
 bool
 IfStatement::analyze_semantics(Parser& parser) {
-
-  // condition
+  if (!m_condition->analyze_semantics(parser, m_location)) {
+    return false;
+  }
   auto return_val = m_if_body->analyze_semantics(parser);
+  if (!m_else_body)
+    return return_val;
   return return_val && m_else_body->analyze_semantics(parser);
 }
 

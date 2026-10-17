@@ -1,6 +1,7 @@
 #pragma once
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
+#include <memory>
 #include <vector>
 
 namespace ag {
@@ -28,6 +29,62 @@ enum class BIN_OPERATOR {
   INDEXING,
   ARROW
 };
+
+inline std::string_view
+to_symbol(BIN_OPERATOR o) {
+  switch (o) {
+  case BIN_OPERATOR::ADDITION:
+    return "+";
+  case BIN_OPERATOR::SUBTRACTION:
+    return "-";
+  case BIN_OPERATOR::MULTIPLICATION:
+    return "*";
+  case BIN_OPERATOR::DIVISION:
+    return "/";
+  case BIN_OPERATOR::MODULUS:
+    return "%";
+
+  case BIN_OPERATOR::BITWISE_XOR:
+    return "^";
+  case BIN_OPERATOR::BITWISE_AND:
+    return "&";
+  case BIN_OPERATOR::BITWISE_OR:
+    return "|";
+  case BIN_OPERATOR::LEFT_SHIFT:
+    return "<<";
+  case BIN_OPERATOR::RIGHT_SHIFT:
+    return ">>";
+
+  case BIN_OPERATOR::LESS_THAN:
+    return "<";
+  case BIN_OPERATOR::LESS_THAN_EQUAL:
+    return "<=";
+  case BIN_OPERATOR::GREATER_THAN:
+    return ">";
+  case BIN_OPERATOR::GREATER_THAN_EQUAL:
+    return ">=";
+  case BIN_OPERATOR::EQUAL_TO:
+    return "==";
+  case BIN_OPERATOR::NOT_EQUAL_TO:
+    return "!=";
+
+  case BIN_OPERATOR::ASSIGN_TO:
+    return "=";
+  case BIN_OPERATOR::LOGICAL_AND:
+    return "&&";
+  case BIN_OPERATOR::LOGICAL_OR:
+    return "||";
+
+  case BIN_OPERATOR::INDEXING:
+    return "[]";
+  case BIN_OPERATOR::ARROW:
+    return "->";
+
+  case BIN_OPERATOR::NONE:
+    return "<none>";
+  }
+  return "<unknown>";
+}
 
 enum class UN_OPERATOR {
   PRE_INCREMENT,
@@ -60,6 +117,17 @@ public:
 
   virtual PrimitiveType
   get_type();
+
+  virtual std::string
+  generate(CodeGenContext& context) {
+    return "";
+  }
+
+  virtual bool
+  analyze_semantics(Parser&,
+                    const SourceLocation&) {
+    return true;
+  }
 };
 
 class BinaryExpression : public Expression {
@@ -84,6 +152,13 @@ public:
   virtual PrimitiveType
   get_type() override;
 
+  virtual bool
+  analyze_semantics(Parser&,
+                    const SourceLocation&) override;
+
+  virtual std::string
+  generate(CodeGenContext& context) override;
+
   BIN_OPERATOR         bin_operator = BIN_OPERATOR::NONE;
   AG_scope<Expression> left;
   AG_scope<Expression> right;
@@ -104,6 +179,15 @@ public:
   virtual PrimitiveType
   get_type() override;
 
+  virtual bool
+  analyze_semantics(Parser&,
+                    const SourceLocation&) override;
+
+  virtual std::string
+  generate(CodeGenContext& context) override {
+    return "";
+  }
+
   AG_scope<Expression> operand;
   UN_OPERATOR          un_operator;
 };
@@ -121,7 +205,15 @@ public:
   virtual PrimitiveType
   get_type() override;
 
-private:
+  virtual bool
+  analyze_semantics(Parser&,
+                    const SourceLocation&) override;
+
+  virtual std::string
+  generate(CodeGenContext& context) override {
+    return std::string(value);
+  }
+
   std::string_view value;
   PrimitiveType    primary_type;
 };
@@ -136,8 +228,19 @@ public:
   parse(Parser&              parser,
         AG_scope<Expression> object);
 
+  virtual bool
+  analyze_semantics(Parser&,
+                    const SourceLocation&) override {
+    return true;
+  }
+
   virtual PrimitiveType
   get_type() override;
+
+  virtual std::string
+  generate(CodeGenContext& context) override {
+    return "";
+  }
 };
 
 class CallExpression : public Expression {
@@ -149,8 +252,19 @@ public:
   parse(Parser&              parser,
         AG_scope<Expression> callee);
 
+  virtual bool
+  analyze_semantics(Parser&,
+                    const SourceLocation&) override {
+    return true;
+  }
+
   virtual PrimitiveType
   get_type() override;
+
+  virtual std::string
+  generate(CodeGenContext& context) override {
+    return "";
+  }
 };
 
 class IndexExpression : public Expression {
@@ -164,6 +278,17 @@ public:
 
   virtual PrimitiveType
   get_type() override;
+
+  virtual bool
+  analyze_semantics(Parser&,
+                    const SourceLocation&) override {
+    return true;
+  }
+
+  virtual std::string
+  generate(CodeGenContext& context) override {
+    return "";
+  }
 };
 
 } // namespace ag

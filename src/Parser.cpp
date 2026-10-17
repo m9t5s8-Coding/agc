@@ -36,25 +36,18 @@ Parser::parse() {
     ptr->analyze_semantics(*this);
   }
 
-  return;
-
   CodeGenContext context;
-  context.text << "_start:\n";
   for (const auto& ptr : m_statements) {
     ptr->generate(context);
   }
 
-  std::ofstream outfile("out.asm");
+  std::ofstream outfile("out.ir");
   if (!outfile.is_open()) {
     return;
   }
   {
     std::stringstream ss;
-    ss << "section .data\n"
-       << context.data.str() << "\n"
-       << "section .text\n"
-       << "global _start\n\n"
-       << context.text.str();
+    ss << context.text.str();
     outfile << ss.str();
     outfile.close();
     // system("nasm -f elf64 out.asm -o out.o");

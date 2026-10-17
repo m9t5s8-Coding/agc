@@ -2,6 +2,7 @@
 #include "Parser.hpp"
 
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -16,6 +17,12 @@ main(int   argc,
   }
   std::stringstream buffer;
   {
+    std::filesystem::path path(argv[1]);
+    if (path.extension() != ".ag") {
+      std::cerr << "Error: Invalid file extension. Expected a '.ag' file.\n";
+      return EXIT_FAILURE;
+    }
+
     std::ifstream file(argv[1]);
     if (!file.is_open()) {
       std::cerr << "File not opened!\n";
@@ -32,7 +39,6 @@ main(int   argc,
   parser.set_lexer(lexer);
   parser.parse();
   if (!parser.is_syntax_valid()) {
-    std::cout << "Invalid Syntax!" << std::endl;
     return EXIT_SUCCESS;
   }
 

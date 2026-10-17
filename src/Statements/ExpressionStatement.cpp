@@ -7,8 +7,9 @@
 namespace ag {
 AG_scope<Statements>
 ExpressionStatement::parse_expression_statement(Parser& parser) {
-  auto expr_statement = AG_cscope<ExpressionStatement>();
-  auto expr           = Expression::parse_expressions(parser);
+  auto expr_statement             = AG_cscope<ExpressionStatement>();
+  expr_statement->m_location.line = parser.current_token().line;
+  auto expr                       = Expression::parse_expressions(parser);
   if (!expr) {
     return nullptr;
   }
@@ -17,5 +18,15 @@ ExpressionStatement::parse_expression_statement(Parser& parser) {
     return nullptr;
   }
   return expr_statement;
+}
+
+bool
+ExpressionStatement::analyze_semantics(Parser& parser) {
+  return m_expression->analyze_semantics(parser, m_location);
+}
+
+void
+ExpressionStatement::generate(CodeGenContext& context) {
+  m_expression->generate(context);
 }
 } // namespace ag

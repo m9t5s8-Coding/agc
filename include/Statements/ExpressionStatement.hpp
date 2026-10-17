@@ -11,12 +11,10 @@ public:
   parse_expression_statement(Parser&);
 
   virtual void
-  generate(CodeGenContext&) override {}
+  generate(CodeGenContext&) override;
 
   virtual bool
-  analyze_semantics(Parser& parser) override {
-    return true;
-  }
+  analyze_semantics(Parser& parser) override;
 
 private:
   AG_scope<Expression> m_expression;

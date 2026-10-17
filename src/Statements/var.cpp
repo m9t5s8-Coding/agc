@@ -36,7 +36,13 @@ VarStatement::ParseVar(Parser& parser) {
 }
 
 void
-VarStatement::generate(CodeGenContext& context) {}
+VarStatement::generate(CodeGenContext& context) {
+  if (!m_expr)
+    return;
+
+  auto expr = m_expr->generate(context);
+  context.text << m_name << " = " << expr << '\n';
+}
 
 bool
 VarStatement::analyze_semantics(Parser& parser) {
@@ -53,15 +59,13 @@ VarStatement::analyze_semantics(Parser& parser) {
   if (!m_expr)
     return true;
   auto type = m_expr->get_type();
-  if (type == PrimitiveType::UNEXPECTED) {
-    print_error(error::UseOfUndefined, parser, m_location);
+  if (!m_expr->analyze_semantics(parser, m_location)) {
     return false;
   }
   if (!is_compatible_datatype(m_datatype.primitive_type, m_expr->get_type())) {
     print_error(error::IncompatibleTypes, parser, m_location);
     return false;
   }
-
   return true;
 }
 

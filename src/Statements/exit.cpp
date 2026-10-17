@@ -26,15 +26,20 @@ ExitStatement::ParseExit(Parser& parser) {
 }
 
 void
-ExitStatement::generate(CodeGenContext& context) {}
+ExitStatement::generate(CodeGenContext& context) {
+  auto exp = m_exit_expr->generate((context));
+  if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_exit_expr.get());
+      bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
+    exp = bin_expr->left->generate(context);
+  }
+  context.text << "param " << exp << '\n' << "call __ag_exit()\n";
+}
 
 bool
 ExitStatement::analyze_semantics(Parser& parser) {
-  auto type = m_exit_expr->get_type();
-  if (type == PrimitiveType::UNEXPECTED) {
-    print_error(error::UseOfUndefined, parser, m_location);
+  if (!m_exit_expr->analyze_semantics(parser, m_location))
     return false;
-  }
+  auto type = m_exit_expr->get_type();
   if (!is_compatible_datatype(PrimitiveType::INT, type)) {
     print_error(error::IncompatibleTypes, parser, m_location);
     return false;

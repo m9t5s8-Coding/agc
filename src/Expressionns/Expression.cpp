@@ -116,7 +116,7 @@ get_binding_power(BIN_OPERATOR bin_op) {
 
   switch (bin_op) {
   case BIN_OPERATOR::ASSIGN_TO:
-    return {1.0f, 1.1f};
+    return {1.1f, 1.0f};
   case BIN_OPERATOR::LOGICAL_OR:
     return {2.0f, 2.1f};
   case BIN_OPERATOR::LOGICAL_AND:
@@ -235,12 +235,18 @@ Expression::get_type() {
 
 PrimitiveType
 BinaryExpression::get_type() {
-  return PrimitiveType::VOID;
+  auto left_type  = left->get_type();
+  auto right_type = right->get_type();
+  if (left_type != PrimitiveType::UNEXPECTED && left_type == right_type) {
+    return left_type;
+  }
+  return PrimitiveType::UNEXPECTED;
 }
 
 PrimitiveType
 UniaryExpression::get_type() {
-  return PrimitiveType::VOID;
+  auto type = get_type();
+  return type;
 }
 
 PrimitiveType
@@ -373,6 +379,70 @@ UniaryExpression::parse_postfix(Parser&              parser,
   postfix_expr->operand     = std::move(operand);
 
   return postfix_expr;
+}
+
+bool
+PrimaryExpression::analyze_semantics(Parser&               parser,
+                                     const SourceLocation& location) {
+  if (primary_type != PrimitiveType::IDENTIFIER)
+    return true;
+  auto data = get_symbol_table().lookup(value);
+  auto type = data ? data->type.primitive_type : PrimitiveType::UNEXPECTED;
+  if (type == PrimitiveType::UNEXPECTED) {
+    print_error(error::UseOfUndefined, parser, location);
+    return false;
+  }
+  return true;
+}
+
+bool
+UniaryExpression::analyze_semantics(Parser&               parser,
+                                    const SourceLocation& location) {
+  return true;
+}
+bool
+BinaryExpression::analyze_semantics(Parser&               parser,
+                                    const SourceLocation& location) {
+  if (!left->analyze_semantics(parser, location))
+    return false;
+  if (!right->analyze_semantics(parser, location))
+    return false;
+
+  {
+    if (bin_operator == BIN_OPERATOR::ASSIGN_TO) {
+      auto l = dynamic_cast<PrimaryExpression*>(left.get());
+      if (!l || l->primary_type != PrimitiveType::IDENTIFIER) {
+        print_error(error::InvalidAssignmentError, parser, location);
+        return false;
+      }
+    }
+  }
+  {
+    const auto left_type  = left->get_type();
+    const auto right_type = right->get_type();
+    if (left_type == PrimitiveType::UNEXPECTED || right_type == PrimitiveType::UNEXPECTED || left_type != right_type) {
+      print_error(error::InvalidOperandTypes, parser, location);
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string
+BinaryExpression::generate(CodeGenContext& context) {
+  if (bin_operator == BIN_OPERATOR::ASSIGN_TO) {
+    auto l = dynamic_cast<PrimaryExpression*>(left.get());
+    if (l) {
+      auto r = right->generate(context);
+      context.text << l->get_value() << " = " << r << '\n';
+      return std::string(l->get_value());
+    }
+    return "";
+  }
+  auto l = left->generate(context);
+  auto r = right->generate(context);
+  context.text << "t" << context.temp_label << " = " << l << ' ' << to_symbol(bin_operator) << " " << r << '\n';
+  return "t" + std::to_string(context.temp_label++);
 }
 
 } // namespace ag
