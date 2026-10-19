@@ -4,13 +4,14 @@ EXE_NAME := agc
 all: build_install
 
 configure:
-	@cmake $(BUILD_DIR)
+	@cmake -S . -B $(BUILD_DIR)
 
 build: configure
 	@cmake --build $(BUILD_DIR)
 
-install: 
-	@sudo cmake --install build
+install:
+	@sudo cmake --install $(BUILD_DIR)
 
 build_install: build install
 
+.PHONY: all configure build install build_install

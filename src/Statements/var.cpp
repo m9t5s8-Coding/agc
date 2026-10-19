@@ -1,5 +1,6 @@
 #include "Statements/var.hpp"
 #include "Expressions/Expression.hpp"
+#include "IR/Assign.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
 #include "SymbolTable.hpp"
@@ -36,12 +37,15 @@ VarStatement::ParseVar(Parser& parser) {
 }
 
 void
-VarStatement::generate(CodeGenContext& context) {
+VarStatement::generate_ir(CodeGenContext& context,
+                          Parser&         parser) {
   if (!m_expr)
     return;
 
-  auto expr = m_expr->generate(context);
-  context.text << m_name << " = " << expr << '\n';
+  auto expr = m_expr->generate_ir(context, parser);
+  // context.text << m_name << " = " << expr << '\n';
+  auto instr = AG_cscope<Assign>(expr, std::string(m_name));
+  parser.add_instructios(std::move(instr));
 }
 
 bool

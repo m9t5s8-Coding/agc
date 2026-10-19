@@ -1,4 +1,5 @@
 #pragma once
+#include "IR/Instructions.hpp"
 #include "Lexer.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
@@ -148,6 +149,9 @@ public:
     return m_invalid_syntax == false;
   }
 
+  void
+  add_instructios(AG_scope<Instructions> instruction);
+
   // Parse the Tokens
   void
   parse();
@@ -170,7 +174,8 @@ private:
   size_t       m_index          = 0;
   bool         m_invalid_syntax = false;
 
-  std::vector<AG_scope<Statements>> m_statements;
+  std::vector<AG_scope<Statements>>   m_statements;
+  std::vector<AG_scope<Instructions>> m_instructions;
 };
 
 } // namespace ag

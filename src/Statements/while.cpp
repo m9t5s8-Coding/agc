@@ -21,9 +21,21 @@ WhileStatement::ParseWhile(Parser& parser) {
 
   return while_stmt;
 }
-
+// while(x < 10)
 void
-WhileStatement::generate(CodeGenContext& context) {}
+WhileStatement::generate_ir(CodeGenContext& context,
+                            Parser&         parser) {
+  auto cond_l = context.block_label++;
+  auto then_l = context.block_label++;
+  auto end_l  = context.block_label++;
+  // context.text << 'b' << cond_l << ":\n";
+  auto cond = m_condition->generate_ir(context, parser);
+
+  // context.text << "if " << cond << " jump b" << then_l << " else jump b" << end_l << "\nb" << then_l << ":\n";
+  m_while_body->generate_ir(context, parser);
+
+  // context.text << "jump b" << cond_l << '\n' << "b" << end_l << ":\n";
+}
 
 bool
 WhileStatement::analyze_semantics(Parser& parser) {

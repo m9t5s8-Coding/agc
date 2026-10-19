@@ -13,7 +13,8 @@ public:
   ParseWrite(Parser& parser);
 
   virtual void
-  generate(CodeGenContext& context) override;
+  generate_ir(CodeGenContext&,
+              Parser&) override;
 
   virtual bool
   analyze_semantics(Parser& parser) override;

@@ -25,7 +25,25 @@ IfStatement::ParseIf(Parser& parser) {
   return if_stmt;
 }
 void
-IfStatement::generate(CodeGenContext&) {}
+IfStatement::generate_ir(CodeGenContext& context,
+                         Parser&         parser) {
+  auto cond    = m_condition->generate_ir(context, parser);
+  auto then_l  = context.block_label++;
+  auto else_l  = m_else_body ? context.block_label++ : 0;
+  auto end_l   = context.block_label++;
+  auto false_l = m_else_body ? else_l : end_l;
+
+  // context.text << "if " << cond << " jump b" << then_l << " else jump b" << false_l << "\n" << 'b' << then_l <<
+  // ":\n";
+  m_if_body->generate_ir(context, parser);
+  // context.text << "jump " << 'b' << end_l << '\n';
+  if (m_else_body) {
+    // context.text << 'b' << else_l << ":\n";
+    m_else_body->generate_ir(context, parser);
+    // context.text << "jump " << 'b' << end_l << '\n';
+  }
+  // context.text << 'b' << end_l << ":\n";
+}
 
 bool
 IfStatement::analyze_semantics(Parser& parser) {

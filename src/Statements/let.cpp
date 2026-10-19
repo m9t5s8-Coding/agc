@@ -1,12 +1,12 @@
 #include "Statements/let.hpp"
 #include "Expressions/Expression.hpp"
+#include "IR/Assign.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 #include "SymbolTable.hpp"
 #include "error_msg.hpp"
 #include "macro.hpp"
-#include <iostream>
 
 namespace ag {
 AG_scope<Statements>
@@ -40,12 +40,13 @@ LetStatement::ParseLet(Parser& parser) {
 }
 
 void
-LetStatement::generate(CodeGenContext& context) {
+LetStatement::generate_ir(CodeGenContext& context,
+                          Parser&         parser) {
   if (!m_expr)
     return;
 
-  auto expr = m_expr->generate(context);
-  context.text << m_name << " = " << expr << '\n';
+  auto expr = m_expr->generate_ir(context, parser);
+  parser.add_instructios(AG_cscope<Assign>(expr, std::string(m_name)));
 }
 
 bool

@@ -27,9 +27,10 @@ BodyStatement::ParseBlock(Parser& parser) {
 }
 
 void
-BodyStatement::generate(CodeGenContext& context) {
+BodyStatement::generate_ir(CodeGenContext& context,
+                           Parser&         parser) {
   for (const auto& stmt : m_statements) {
-    stmt->generate(context);
+    stmt->generate_ir(context, parser);
   }
 }
 

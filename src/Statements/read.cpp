@@ -51,25 +51,26 @@ ReadStatement::analyze_semantics(Parser& parser) {
 }
 
 void
-ReadStatement::generate(CodeGenContext& context) {
+ReadStatement::generate_ir(CodeGenContext& context,
+                           Parser&         parser) {
   {
-    auto exp = m_buffer->generate((context));
+    auto exp = m_buffer->generate_ir(context, parser);
     if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_buffer.get());
         bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
-      exp = bin_expr->left->generate(context);
+      exp = bin_expr->left->generate_ir(context, parser);
     }
-    context.text << "param " << exp << '\n';
+    // context.text << "param " << exp << '\n';
   }
   {
-    auto exp = m_buffer_size->generate((context));
+    auto exp = m_buffer_size->generate_ir(context, parser);
     if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_buffer_size.get());
         bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
-      exp = bin_expr->left->generate(context);
+      exp = bin_expr->left->generate_ir(context, parser);
     }
-    context.text << "param " << exp << '\n';
+    // context.text << "param " << exp << '\n';
   }
 
-  context.text << "call __ag_read()\n";
+  // context.text << "call __ag_read()\n";
 }
 
 } // namespace ag

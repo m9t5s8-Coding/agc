@@ -107,8 +107,9 @@ FunctionStatement::analyze_semantics(Parser& parser) {
 }
 
 void
-FunctionStatement::generate(CodeGenContext& context) {
-  m_function_body->generate(context);
+FunctionStatement::generate_ir(CodeGenContext& context,
+                               Parser&         parser) {
+  m_function_body->generate_ir(context, parser);
 }
 
 } // namespace ag

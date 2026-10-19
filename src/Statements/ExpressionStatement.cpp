@@ -26,7 +26,8 @@ ExpressionStatement::analyze_semantics(Parser& parser) {
 }
 
 void
-ExpressionStatement::generate(CodeGenContext& context) {
-  m_expression->generate(context);
+ExpressionStatement::generate_ir(CodeGenContext& context,
+                                 Parser&         parser) {
+  m_expression->generate_ir(context, parser);
 }
 } // namespace ag

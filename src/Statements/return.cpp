@@ -26,13 +26,14 @@ ReturnStatement::ParseReturn(Parser& parser) {
 }
 
 void
-ReturnStatement::generate(CodeGenContext& context) {
-  auto exp = m_return_expr->generate((context));
+ReturnStatement::generate_ir(CodeGenContext& context,
+                             Parser&         parser) {
+  auto exp = m_return_expr->generate_ir(context, parser);
   if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_return_expr.get());
       bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
-    exp = bin_expr->left->generate(context);
+    exp = bin_expr->left->generate_ir(context, parser);
   }
-  context.text << "param " << exp << '\n' << "return\n";
+  // context.text << "param " << exp << '\n' << "return\n";
 }
 
 bool

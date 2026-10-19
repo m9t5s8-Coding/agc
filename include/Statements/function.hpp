@@ -24,7 +24,8 @@ public:
   ParseFunction(Parser& parser);
 
   virtual void
-  generate(CodeGenContext&) override;
+  generate_ir(CodeGenContext&,
+              Parser&) override;
 
   virtual bool
   analyze_semantics(Parser& parser) override;

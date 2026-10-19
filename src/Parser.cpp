@@ -1,5 +1,6 @@
 #include "Parser.hpp"
 
+#include "IR/Instructions.hpp"
 #include "Statements/ExpressionStatement.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/body.hpp"
@@ -15,7 +16,6 @@
 #include "Token.hpp"
 
 #include <fstream>
-#include <iostream>
 
 namespace ag {
 void
@@ -38,7 +38,11 @@ Parser::parse() {
 
   CodeGenContext context;
   for (const auto& ptr : m_statements) {
-    ptr->generate(context);
+    ptr->generate_ir(context, *this);
+  }
+
+  for (const auto& instr : m_instructions) {
+    context.text << instr->to_string();
   }
 
   std::ofstream outfile("out.ir");
@@ -94,5 +98,12 @@ Parser::parse_statement() {
     return ExpressionStatement::parse_expression_statement(*this);
   }
   return nullptr;
+}
+
+void
+Parser::add_instructios(AG_scope<Instructions> instruction) {
+  if (instruction) {
+    m_instructions.emplace_back(std::move(instruction));
+  }
 }
 } // namespace ag

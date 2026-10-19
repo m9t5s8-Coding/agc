@@ -1,4 +1,6 @@
 #include "Expressions/Expression.hpp"
+#include "IR/Assign.hpp"
+#include "IR/Binary.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
@@ -6,7 +8,7 @@
 #include "Token.hpp"
 #include "error_msg.hpp"
 #include <initializer_list>
-#include <iostream>
+#include <memory>
 
 namespace ag {
 static UN_OPERATOR
@@ -429,20 +431,26 @@ BinaryExpression::analyze_semantics(Parser&               parser,
 }
 
 std::string
-BinaryExpression::generate(CodeGenContext& context) {
+BinaryExpression::generate_ir(CodeGenContext& context,
+                              Parser&         parser) {
+  auto r = right->generate_ir(context, parser);
   if (bin_operator == BIN_OPERATOR::ASSIGN_TO) {
     auto l = dynamic_cast<PrimaryExpression*>(left.get());
     if (l) {
-      auto r = right->generate(context);
-      context.text << l->get_value() << " = " << r << '\n';
-      return std::string(l->get_value());
+      // context.text << l->get_value() << " = " << r << '\n';
+      auto left_value = std::string(l->get_value());
+      auto instr      = AG_cscope<Assign>(r, left_value);
+      parser.add_instructios(std::move(instr));
+      return left_value;
     }
     return "";
   }
-  auto l = left->generate(context);
-  auto r = right->generate(context);
-  context.text << "t" << context.temp_label << " = " << l << ' ' << to_symbol(bin_operator) << " " << r << '\n';
-  return "t" + std::to_string(context.temp_label++);
+  auto        l    = left->generate_ir(context, parser);
+  std::string temp = "t" + std::to_string(context.temp_label++);
+  // context.text << temp << " = " << l << ' ' << to_symbol(bin_operator) << " " << r << '\n';
+  auto instr = AG_cscope<Binary>(temp, l, r, bin_operator);
+  parser.add_instructios(std::move(instr));
+  return temp;
 }
 
 } // namespace ag

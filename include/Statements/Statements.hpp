@@ -44,7 +44,8 @@ public:
   virtual ~Statements() {}
 
   virtual void
-  generate(CodeGenContext&) = 0;
+  generate_ir(CodeGenContext&,
+              Parser&) = 0;
 
   virtual bool
   analyze_semantics(Parser&) = 0;

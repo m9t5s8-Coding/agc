@@ -26,13 +26,14 @@ ExitStatement::ParseExit(Parser& parser) {
 }
 
 void
-ExitStatement::generate(CodeGenContext& context) {
-  auto exp = m_exit_expr->generate((context));
+ExitStatement::generate_ir(CodeGenContext& context,
+                           Parser&         parser) {
+  auto exp = m_exit_expr->generate_ir(context, parser);
   if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_exit_expr.get());
       bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
-    exp = bin_expr->left->generate(context);
+    exp = bin_expr->left->generate_ir(context, parser);
   }
-  context.text << "param " << exp << '\n' << "call __ag_exit()\n";
+  // context.text << "param " << exp << '\n' << "call __ag_exit()\n";
 }
 
 bool

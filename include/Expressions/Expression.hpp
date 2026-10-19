@@ -119,7 +119,8 @@ public:
   get_type();
 
   virtual std::string
-  generate(CodeGenContext& context) {
+  generate_ir(CodeGenContext& context,
+              Parser&         parser) {
     return "";
   }
 
@@ -157,7 +158,8 @@ public:
                     const SourceLocation&) override;
 
   virtual std::string
-  generate(CodeGenContext& context) override;
+  generate_ir(CodeGenContext& context,
+              Parser&         parser) override;
 
   BIN_OPERATOR         bin_operator = BIN_OPERATOR::NONE;
   AG_scope<Expression> left;
@@ -184,7 +186,8 @@ public:
                     const SourceLocation&) override;
 
   virtual std::string
-  generate(CodeGenContext& context) override {
+  generate_ir(CodeGenContext& context,
+              Parser&         parser) override {
     return "";
   }
 
@@ -210,7 +213,8 @@ public:
                     const SourceLocation&) override;
 
   virtual std::string
-  generate(CodeGenContext& context) override {
+  generate_ir(CodeGenContext& context,
+              Parser&         parser) override {
     return std::string(value);
   }
 
@@ -238,7 +242,8 @@ public:
   get_type() override;
 
   virtual std::string
-  generate(CodeGenContext& context) override {
+  generate_ir(CodeGenContext& context,
+              Parser&         parser) override {
     return "";
   }
 };
@@ -262,7 +267,8 @@ public:
   get_type() override;
 
   virtual std::string
-  generate(CodeGenContext& context) override {
+  generate_ir(CodeGenContext& context,
+              Parser&         parser) override {
     return "";
   }
 };
@@ -286,7 +292,8 @@ public:
   }
 
   virtual std::string
-  generate(CodeGenContext& context) override {
+  generate_ir(CodeGenContext& context,
+              Parser&         parser) override {
     return "";
   }
 };
