@@ -1,6 +1,7 @@
 #include "Statements/exit.hpp"
 
 #include "Expressions/Expression.hpp"
+#include "IR/IR.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
@@ -33,7 +34,8 @@ ExitStatement::generate_ir(CodeGenContext& context,
       bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
     exp = bin_expr->left->generate_ir(context, parser);
   }
-  // context.text << "param " << exp << '\n' << "call __ag_exit()\n";
+  parser.add_instructios(AG_cscope<Param>(exp));
+  parser.add_instructios(AG_cscope<FunctionCall>("__ag_exit()"));
 }
 
 bool

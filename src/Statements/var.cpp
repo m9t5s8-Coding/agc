@@ -44,8 +44,7 @@ VarStatement::generate_ir(CodeGenContext& context,
 
   auto expr = m_expr->generate_ir(context, parser);
   // context.text << m_name << " = " << expr << '\n';
-  auto instr = AG_cscope<Assign>(expr, std::string(m_name));
-  parser.add_instructios(std::move(instr));
+  parser.add_instructios(AG_cscope<Assign>(expr, std::string(m_name)));
 }
 
 bool

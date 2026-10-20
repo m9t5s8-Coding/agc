@@ -1,5 +1,6 @@
 #include "Statements/write.hpp"
 
+#include "IR/IR.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 // #include "SymbolTable.hpp"
@@ -38,6 +39,7 @@ WriteStatement::generate_ir(CodeGenContext& context,
         bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
       exp = bin_expr->left->generate_ir(context, parser);
     }
+    parser.add_instructios(AG_cscope<Param>(exp));
     // context.text << "param " << exp << '\n';
   }
   {
@@ -46,9 +48,11 @@ WriteStatement::generate_ir(CodeGenContext& context,
         bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
       exp = bin_expr->left->generate_ir(context, parser);
     }
+    parser.add_instructios(AG_cscope<Param>(exp));
     // context.text << "param " << exp << '\n';
   }
 
+  parser.add_instructios(AG_cscope<FunctionCall>("__ag_write()"));
   // context.text << "call __ag_write()\n";
 }
 

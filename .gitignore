@@ -2,6 +2,8 @@
 /build/
 compile_commands.json
 test.ag
+ir.ag
+out.ir
 out.asm
 out.o
 out

@@ -1,25 +1,21 @@
 func main() -> int {
-  # let r : int = (((1 + 2) * (9 - 4)) % 7 << 2) & 255 | (5 > 3 && 1 != 0);
   let r : int = 10;
   let x : int = 20;
   # r =  (((1 + 2) * (9 - 4)) % 7 << 2) & 255 | (5 > 3 && 1 != 0);
-  # let str : string = "Hello World!";
-  # if(r > 30) {
-  #   if(r >40) {
-  #   read(str, x);
-  #   }
-  #   return (x);
-  # } else {
-  #   write(str, x);
-  # }
-
-r = r + 10;
+  let str : string = "Hello World!";
+  if(r > 30) {
+    if(r >40) {
+      read(str, x);
+    }
+    return (x);
+  } else {
+    write(str, x);
+  }
+  r = r + 10;
   r = 1;
   while(r < 30) {
     r = r + 1;
   }
-
-
-  return(10 - 2);
   exit(r = 2);
+  return(10 - 2);
 }

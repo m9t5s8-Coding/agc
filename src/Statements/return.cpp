@@ -1,6 +1,7 @@
 #include "Statements/return.hpp"
 
 #include "Expressions/Expression.hpp"
+#include "IR/IR.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 // #include "SymbolTable.hpp"
@@ -34,6 +35,8 @@ ReturnStatement::generate_ir(CodeGenContext& context,
     exp = bin_expr->left->generate_ir(context, parser);
   }
   // context.text << "param " << exp << '\n' << "return\n";
+  parser.add_instructios(AG_cscope<Param>(exp));
+  parser.add_instructios(AG_cscope<Return>());
 }
 
 bool
