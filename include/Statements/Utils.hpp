@@ -254,10 +254,10 @@ string_view_2_string(const std::string_view& str_view) {
 class Parser;
 void
 print_error(const std::string_view error,
-            const Parser&          parser);
+            Parser&                parser);
 
 void
 print_error(const std::string_view error,
-            const Parser&          parser,
+            Parser&                parser,
             const SourceLocation&  location);
 } // namespace ag

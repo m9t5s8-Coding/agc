@@ -14,12 +14,14 @@
 #include "Statements/while.hpp"
 #include "Statements/write.hpp"
 #include "Token.hpp"
+#include "json.hpp"
 
 #include <fstream>
 
 namespace ag {
 void
 Parser::parse() {
+  CodeGenContext context;
 
   while (is_valid()) {
     if (!add_statements(parse_statement())) {
@@ -28,34 +30,47 @@ Parser::parse() {
     }
     // advance();
   }
-  if (m_invalid_syntax) {
-    return;
+
+  if (!m_invalid_syntax) {
+    for (const auto& ptr : m_statements) {
+      if (!ptr->analyze_semantics(*this)) {
+        m_invalid_syntax = true;
+        break;
+      }
+    }
   }
 
-  for (const auto& ptr : m_statements) {
-    ptr->analyze_semantics(*this);
+  if (!m_invalid_syntax) {
+    for (const auto& ptr : m_statements) {
+      ptr->generate_ir(context, *this);
+    }
+
+    for (const auto& instr : m_instructions) {
+      context.text << instr->to_string();
+    }
   }
 
-  CodeGenContext context;
-  for (const auto& ptr : m_statements) {
-    ptr->generate_ir(context, *this);
-  }
-
-  for (const auto& instr : m_instructions) {
-    context.text << instr->to_string();
-  }
-
-  std::ofstream outfile("out.ir");
-  if (!outfile.is_open()) {
-    return;
-  }
-  {
-    std::stringstream ss;
-    ss << context.text.str();
-    outfile << ss.str();
-    outfile.close();
-    // system("nasm -f elf64 out.asm -o out.o");
-    // system("ld out.o -o out");
+  if (!m_output_file.empty() && m_output_format != OutputFormat::NONE) {
+    std::ofstream outfile(m_output_file);
+    if (!outfile.is_open()) {
+      return;
+    }
+    {
+      std::string output_text;
+      if (m_output_format == OutputFormat::JSON) {
+        nlohmann::json j;
+        j["error"]  = m_error_message;
+        j["status"] = !m_invalid_syntax;
+        j["output"] = context.text.str();
+        output_text = j.dump(4);
+      } else if (m_output_format == OutputFormat::TEXT) {
+        output_text = context.text.str();
+      }
+      outfile << output_text;
+      outfile.close();
+      // system("nasm -f elf64 out.asm -o out.o");
+      // system("ld out.o -o out");
+    }
   }
 }
 

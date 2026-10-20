@@ -2,6 +2,7 @@
 #include "Parser.hpp"
 
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -15,6 +16,19 @@ main(int   argc,
     std::cout << "Usuage: agc <file> ...\n";
     return EXIT_FAILURE;
   }
+  std::string      output_file;
+  ag::OutputFormat format = ag::OutputFormat::NONE;
+  if (argc == 5) {
+    if (!strcmp(argv[2], "-o")) {
+      if (!strcmp(argv[3], "json")) {
+        format = ag::OutputFormat::JSON;
+      } else if (!strcmp(argv[3], "text")) {
+        format = ag::OutputFormat::TEXT;
+      }
+      output_file = argv[4];
+    }
+  }
+
   std::stringstream buffer;
   {
     std::filesystem::path path(argv[1]);
@@ -36,6 +50,8 @@ main(int   argc,
   lexer.set_filename(argv[1]);
   lexer.set_source_code(file_data);
   lexer.tokenize();
+  parser.set_output_format(format);
+  parser.set_output_file(output_file);
   parser.set_lexer(lexer);
   parser.parse();
   if (!parser.is_syntax_valid()) {

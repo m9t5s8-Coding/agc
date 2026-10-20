@@ -9,6 +9,7 @@
 
 namespace ag {
 using TokensVector = std::vector<Token>;
+enum class OutputFormat { JSON, TEXT, NONE };
 class Parser {
 public:
   // Set Lexer so that we can use later
@@ -50,10 +51,25 @@ public:
     return true;
   }
 
+  void
+  set_output_file(const std::string& output_file) {
+    m_output_file = output_file;
+  }
+
+  void
+  set_output_format(OutputFormat format) {
+    m_output_format = format;
+  }
+
   // Check the current token
   bool
   check(TokenName token_name) const {
     return current_token().token_name == token_name;
+  }
+
+  void
+  append_error_message(const std::string& message) {
+    m_error_message += message;
   }
 
   // Check any one of token and return matched one
@@ -173,6 +189,9 @@ private:
   TokensVector m_tokens;
   size_t       m_index          = 0;
   bool         m_invalid_syntax = false;
+  std::string  m_output_file;
+  std::string  m_error_message;
+  OutputFormat m_output_format = OutputFormat::NONE;
 
   std::vector<AG_scope<Statements>>   m_statements;
   std::vector<AG_scope<Instructions>> m_instructions;
