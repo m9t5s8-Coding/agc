@@ -214,12 +214,11 @@ public:
 
   virtual std::string
   generate_ir(CodeGenContext& context,
-              Parser&         parser) override {
-    return std::string(value);
-  }
+              Parser&         parser) override;
 
   std::string_view value;
   PrimitiveType    primary_type;
+  size_t           index = 0;
 };
 
 class MemberExpression : public Expression {

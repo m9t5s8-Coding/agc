@@ -61,7 +61,6 @@ ReadStatement::generate_ir(CodeGenContext& context,
       exp = bin_expr->left->generate_ir(context, parser);
     }
     parser.add_instructios(AG_cscope<Param>(exp));
-    // context.text << "param " << exp << '\n';
   }
   {
     auto exp = m_buffer_size->generate_ir(context, parser);
@@ -70,10 +69,8 @@ ReadStatement::generate_ir(CodeGenContext& context,
       exp = bin_expr->left->generate_ir(context, parser);
     }
     parser.add_instructios(AG_cscope<Param>(exp));
-    // context.text << "param " << exp << '\n';
   }
-  parser.add_instructios(AG_cscope<FunctionCall>("__ag_read()"));
-  // context.text << "call __ag_read()\n";
+  parser.add_instructios(AG_cscope<FunctionCall>("__ag_read"));
 }
 
 } // namespace ag

@@ -4,6 +4,6 @@
 namespace ag {
 std::string
 Return::to_string() {
-  return std::format("return\n");
+  return std::format("return {}\n", m_name);
 }
 } // namespace ag

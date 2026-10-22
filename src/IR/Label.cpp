@@ -4,6 +4,6 @@
 namespace ag {
 std::string
 Label::to_string() {
-  return std::format("{}:\n", m_name);
+  return std::format("\n{}:\n", m_name);
 }
 } // namespace ag

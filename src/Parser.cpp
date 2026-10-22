@@ -3,6 +3,7 @@
 #include "IR/Instructions.hpp"
 #include "Statements/ExpressionStatement.hpp"
 #include "Statements/Statements.hpp"
+#include "Statements/Utils.hpp"
 #include "Statements/body.hpp"
 #include "Statements/exit.hpp"
 #include "Statements/function.hpp"
@@ -41,6 +42,7 @@ Parser::parse() {
   }
 
   if (!m_invalid_syntax) {
+    Add_Literals::add_to_instruction(context, *this);
     for (const auto& ptr : m_statements) {
       ptr->generate_ir(context, *this);
     }

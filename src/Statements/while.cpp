@@ -22,7 +22,6 @@ WhileStatement::ParseWhile(Parser& parser) {
 
   return while_stmt;
 }
-// while(x < 10)
 void
 WhileStatement::generate_ir(CodeGenContext& context,
                             Parser&         parser) {
@@ -32,21 +31,18 @@ WhileStatement::generate_ir(CodeGenContext& context,
 
   auto str = 'b' + std::to_string(cond_l);
   parser.add_instructios(AG_cscope<Label>(str));
-  // context.text << 'b' << cond_l << ":\n";
   auto cond = m_condition->generate_ir(context, parser);
 
   str = 'b' + std::to_string(end_l);
   parser.add_instructios(AG_cscope<CondJump>(cond, str));
   str = 'b' + std::to_string(then_l);
   parser.add_instructios(AG_cscope<Label>(str));
-  // context.text << "if " << cond << " jump b" << then_l << " else jump b" << end_l << "\nb" << then_l << ":\n";
   m_while_body->generate_ir(context, parser);
 
   str = 'b' + std::to_string(cond_l);
   parser.add_instructios(AG_cscope<Jump>(str));
   str = 'b' + std::to_string(end_l);
   parser.add_instructios(AG_cscope<Label>(str));
-  // context.text << "jump b" << cond_l << '\n' << "b" << end_l << ":\n";
 }
 
 bool

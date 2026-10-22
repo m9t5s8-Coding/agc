@@ -35,26 +35,27 @@ IfStatement::generate_ir(CodeGenContext& context,
   auto end_l   = context.block_label++;
   auto false_l = m_else_body ? else_l : end_l;
 
-  // context.text << "if " << cond << " jump b" << then_l << " else jump b" << false_l << "\n" << 'b' << then_l <<
-  // ":\n";
   auto str = "b" + std::to_string(false_l);
   parser.add_instructios(AG_cscope<CondJump>(cond, str));
+
   str = 'b' + std::to_string(then_l);
   parser.add_instructios(AG_cscope<Label>(str));
+
   m_if_body->generate_ir(context, parser);
+
   str = 'b' + std::to_string(end_l);
   parser.add_instructios(AG_cscope<Jump>(str));
-  // context.text << "jump " << 'b' << end_l << '\n';
+
   if (m_else_body) {
     str = 'b' + std::to_string(else_l);
     parser.add_instructios(AG_cscope<Label>(str));
-    // context.text << 'b' << else_l << ":\n";
+
     m_else_body->generate_ir(context, parser);
+
     str = 'b' + std::to_string(end_l);
     parser.add_instructios(AG_cscope<Jump>(str));
-    // context.text << "jump " << 'b' << end_l << '\n';
   }
-  // context.text << 'b' << end_l << ":\n";
+
   str = 'b' + std::to_string(end_l);
   parser.add_instructios(AG_cscope<Label>(str));
 }

@@ -35,7 +35,7 @@ ExitStatement::generate_ir(CodeGenContext& context,
     exp = bin_expr->left->generate_ir(context, parser);
   }
   parser.add_instructios(AG_cscope<Param>(exp));
-  parser.add_instructios(AG_cscope<FunctionCall>("__ag_exit()"));
+  parser.add_instructios(AG_cscope<FunctionCall>("__ag_exit"));
 }
 
 bool

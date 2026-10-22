@@ -43,7 +43,6 @@ VarStatement::generate_ir(CodeGenContext& context,
     return;
 
   auto expr = m_expr->generate_ir(context, parser);
-  // context.text << m_name << " = " << expr << '\n';
   parser.add_instructios(AG_cscope<Assign>(expr, std::string(m_name)));
 }
 

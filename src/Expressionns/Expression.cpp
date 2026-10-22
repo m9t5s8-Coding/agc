@@ -1,6 +1,7 @@
 #include "Expressions/Expression.hpp"
 #include "IR/Assign.hpp"
 #include "IR/Binary.hpp"
+#include "IR/DataItem.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
@@ -219,6 +220,7 @@ PrimaryExpression::parse_primary(Parser& parser) {
   if (temp_token == TokenName::AG_STRING_LITERAL) {
     primary_exp->primary_type = PrimitiveType::STRING;
     primary_exp->value        = parser.current_token().value;
+    primary_exp->index        = Add_Literals::add_string_literals(primary_exp->value);
   } else if (temp_token == TokenName::AG_INT_LITERAL) {
     primary_exp->primary_type = PrimitiveType::INT;
     primary_exp->value        = parser.current_token().value;
@@ -451,6 +453,15 @@ BinaryExpression::generate_ir(CodeGenContext& context,
   auto instr = AG_cscope<Binary>(temp, l, r, bin_operator);
   parser.add_instructios(std::move(instr));
   return temp;
+}
+
+std::string
+PrimaryExpression::generate_ir(CodeGenContext& context,
+                               Parser&         parser) {
+  if (primary_type == PrimitiveType::STRING) {
+    return "str" + std::to_string(index);
+  }
+  return std::string(value);
 }
 
 } // namespace ag

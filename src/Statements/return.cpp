@@ -34,9 +34,7 @@ ReturnStatement::generate_ir(CodeGenContext& context,
       bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
     exp = bin_expr->left->generate_ir(context, parser);
   }
-  // context.text << "param " << exp << '\n' << "return\n";
-  parser.add_instructios(AG_cscope<Param>(exp));
-  parser.add_instructios(AG_cscope<Return>());
+  parser.add_instructios(AG_cscope<Return>(exp));
 }
 
 bool

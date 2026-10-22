@@ -59,7 +59,6 @@ LetStatement::analyze_semantics(Parser& parser) {
     print_error(error::RedefinitionOfSymbol, parser, m_location);
     return false;
   }
-  // let x : int = x + 1; TODO
 
   if (!m_expr)
     return true;

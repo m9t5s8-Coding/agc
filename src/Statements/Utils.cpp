@@ -1,7 +1,8 @@
 #include "Statements/Utils.hpp"
+#include "IR/DataItem.hpp"
 #include "Parser.hpp"
+#include "Statements/Statements.hpp"
 #include <format>
-#include <iostream>
 
 namespace ag {
 void
@@ -36,4 +37,15 @@ print_error(const std::string_view error,
   error_msg += "^\n";
   parser.append_error_message(error_msg);
 }
+
+void
+Add_Literals::add_to_instruction(CodeGenContext& context,
+                                 Parser&         parser) {
+  std::string str_name;
+  for (const auto l : s_literals) {
+    str_name = "str" + std ::to_string(context.string_label++);
+    parser.add_instructios(AG_cscope<DataItem>(str_name, std::string(l)));
+  }
+}
+
 } // namespace ag

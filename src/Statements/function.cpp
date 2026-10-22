@@ -3,6 +3,7 @@
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 // #include "SymbolTable.hpp"
+#include "IR/IR.hpp"
 #include "SymbolTable.hpp"
 #include "Token.hpp"
 #include "error_msg.hpp"
@@ -109,7 +110,9 @@ FunctionStatement::analyze_semantics(Parser& parser) {
 void
 FunctionStatement::generate_ir(CodeGenContext& context,
                                Parser&         parser) {
-  m_function_body->generate_ir(context, parser);
+  CodeGenContext func_context;
+  parser.add_instructios(AG_cscope<Label>(generate_function_label(m_function_name, m_parameters)));
+  m_function_body->generate_ir(func_context, parser);
 }
 
 } // namespace ag

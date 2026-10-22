@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <format>
 #include <memory>
 #include <optional>
 #include <string>
@@ -251,6 +252,21 @@ string_view_2_string(const std::string_view& str_view) {
 //         write(x, len);
 //               ^
 
+inline std::string
+generate_function_label(std::string_view                      function_name,
+                        const std::vector<FunctionParameter>& parameters) {
+  std::string param_str;
+  for (size_t i = 0; i < parameters.size(); i++) {
+    param_str += parameters[i].type.type_name;
+    if (i < parameters.size() - 1) {
+      param_str += ", ";
+    }
+  }
+
+  // main(int, string);
+  return std::format("{}({})", function_name, param_str);
+}
+
 class Parser;
 void
 print_error(const std::string_view error,
@@ -260,4 +276,22 @@ void
 print_error(const std::string_view error,
             Parser&                parser,
             const SourceLocation&  location);
+
+class CodeGenContext;
+class Add_Literals {
+public:
+  static size_t
+  add_string_literals(std::string_view literal) {
+    s_literals.push_back(literal);
+    return s_literals.size() - 1;
+  }
+
+  static void
+  add_to_instruction(CodeGenContext& context,
+                     Parser&         parser);
+
+private:
+  inline static std::vector<std::string_view> s_literals;
+};
+
 } // namespace ag
