@@ -11,7 +11,7 @@ public:
   parse_expression_statement(Parser&);
 
   virtual void
-  generate_ir(CodeGenContext&,
+  generate_ir(LabelCounters&,
               Parser&) override;
 
   virtual bool

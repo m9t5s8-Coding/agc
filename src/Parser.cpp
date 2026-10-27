@@ -22,6 +22,7 @@
 namespace ag {
 void
 Parser::parse() {
+  LabelCounters  counter;
   CodeGenContext context;
 
   while (is_valid()) {
@@ -42,16 +43,28 @@ Parser::parse() {
   }
 
   if (!m_invalid_syntax) {
-    Add_Literals::add_to_instruction(context, *this);
+    Add_Literals::add_to_instruction(counter, *this);
     for (const auto& ptr : m_statements) {
-      ptr->generate_ir(context, *this);
+      ptr->generate_ir(counter, *this);
     }
 
     for (const auto& instr : m_instructions) {
-      context.text << instr->to_string();
+      // context.text << instr->to_string();
+      instr->generate_code(context);
     }
   }
 
+  add_system_call_function(context);
+
+  std::stringstream ss;
+  {
+    ss << "section .data\n"
+       << context.data.str() << "\n\n"
+       << "section .text\n"
+       << "global _start\n\n"
+       << context.text.str() << '\n'
+       << context.syscall.str();
+  }
   if (!m_output_file.empty() && m_output_format != OutputFormat::NONE) {
     std::ofstream outfile(m_output_file);
     if (!outfile.is_open()) {
@@ -63,10 +76,10 @@ Parser::parse() {
         nlohmann::json j;
         j["error"]  = m_error_message;
         j["status"] = !m_invalid_syntax;
-        j["output"] = context.text.str();
+        j["output"] = ss.str();
         output_text = j.dump(4);
       } else if (m_output_format == OutputFormat::TEXT) {
-        output_text = context.text.str();
+        output_text = ss.str();
       }
       outfile << output_text;
       outfile.close();

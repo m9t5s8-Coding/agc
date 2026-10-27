@@ -277,6 +277,7 @@ print_error(const std::string_view error,
             Parser&                parser,
             const SourceLocation&  location);
 
+class LabelCounters;
 class CodeGenContext;
 class Add_Literals {
 public:
@@ -287,11 +288,14 @@ public:
   }
 
   static void
-  add_to_instruction(CodeGenContext& context,
-                     Parser&         parser);
+  add_to_instruction(LabelCounters& counter,
+                     Parser&        parser);
 
 private:
   inline static std::vector<std::string_view> s_literals;
 };
+
+void
+add_system_call_function(CodeGenContext&);
 
 } // namespace ag

@@ -37,12 +37,12 @@ VarStatement::ParseVar(Parser& parser) {
 }
 
 void
-VarStatement::generate_ir(CodeGenContext& context,
+VarStatement::generate_ir(LabelCounters& counter,
                           Parser&         parser) {
   if (!m_expr)
     return;
 
-  auto expr = m_expr->generate_ir(context, parser);
+  auto expr = m_expr->generate_ir(counter, parser);
   parser.add_instructios(AG_cscope<Assign>(expr, std::string(m_name)));
 }
 

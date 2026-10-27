@@ -27,10 +27,10 @@ BodyStatement::ParseBlock(Parser& parser) {
 }
 
 void
-BodyStatement::generate_ir(CodeGenContext& context,
+BodyStatement::generate_ir(LabelCounters& counter,
                            Parser&         parser) {
   for (const auto& stmt : m_statements) {
-    stmt->generate_ir(context, parser);
+    stmt->generate_ir(counter, parser);
   }
 }
 

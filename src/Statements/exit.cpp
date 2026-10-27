@@ -27,12 +27,12 @@ ExitStatement::ParseExit(Parser& parser) {
 }
 
 void
-ExitStatement::generate_ir(CodeGenContext& context,
-                           Parser&         parser) {
-  auto exp = m_exit_expr->generate_ir(context, parser);
+ExitStatement::generate_ir(LabelCounters& counter,
+                           Parser&        parser) {
+  auto exp = m_exit_expr->generate_ir(counter, parser);
   if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_exit_expr.get());
       bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
-    exp = bin_expr->left->generate_ir(context, parser);
+    exp = bin_expr->left->generate_ir(counter, parser);
   }
   parser.add_instructios(AG_cscope<Param>(exp));
   parser.add_instructios(AG_cscope<FunctionCall>("__ag_exit"));

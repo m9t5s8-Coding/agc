@@ -1,6 +1,7 @@
 #pragma once
 #include "Expressions/Expression.hpp"
 #include "IR/Instructions.hpp"
+#include "Statements/Statements.hpp"
 
 namespace ag {
 class Binary : public Instructions {
@@ -16,6 +17,9 @@ public:
 
   virtual std::string
   to_string() override;
+
+  virtual void
+  generate_code(CodeGenContext&) override;
 
   std::string  m_store_to;
   std::string  m_left, m_right;

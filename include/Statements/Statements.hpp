@@ -30,7 +30,11 @@ struct CodeGenContext {
   std::stringstream text;
   std::stringstream data;
   std::stringstream bss;
+  std::stringstream rodata;
+  std::stringstream syscall;
+};
 
+struct LabelCounters {
   uint32_t label        = 0;
   uint32_t string_label = 0;
   uint32_t temp_label   = 0;
@@ -45,7 +49,7 @@ public:
   virtual ~Statements() {}
 
   virtual void
-  generate_ir(CodeGenContext&,
+  generate_ir(LabelCounters&,
               Parser&) = 0;
 
   virtual bool

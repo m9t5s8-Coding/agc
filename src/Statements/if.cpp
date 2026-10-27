@@ -27,12 +27,12 @@ IfStatement::ParseIf(Parser& parser) {
   return if_stmt;
 }
 void
-IfStatement::generate_ir(CodeGenContext& context,
+IfStatement::generate_ir(LabelCounters& counter,
                          Parser&         parser) {
-  auto cond    = m_condition->generate_ir(context, parser);
-  auto then_l  = context.block_label++;
-  auto else_l  = m_else_body ? context.block_label++ : 0;
-  auto end_l   = context.block_label++;
+  auto cond    = m_condition->generate_ir(counter, parser);
+  auto then_l  = counter.block_label++;
+  auto else_l  = m_else_body ? counter.block_label++ : 0;
+  auto end_l   = counter.block_label++;
   auto false_l = m_else_body ? else_l : end_l;
 
   auto str = "b" + std::to_string(false_l);
@@ -41,7 +41,7 @@ IfStatement::generate_ir(CodeGenContext& context,
   str = 'b' + std::to_string(then_l);
   parser.add_instructios(AG_cscope<Label>(str));
 
-  m_if_body->generate_ir(context, parser);
+  m_if_body->generate_ir(counter, parser);
 
   str = 'b' + std::to_string(end_l);
   parser.add_instructios(AG_cscope<Jump>(str));
@@ -50,7 +50,7 @@ IfStatement::generate_ir(CodeGenContext& context,
     str = 'b' + std::to_string(else_l);
     parser.add_instructios(AG_cscope<Label>(str));
 
-    m_else_body->generate_ir(context, parser);
+    m_else_body->generate_ir(counter, parser);
 
     str = 'b' + std::to_string(end_l);
     parser.add_instructios(AG_cscope<Jump>(str));

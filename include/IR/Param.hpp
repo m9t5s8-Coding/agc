@@ -1,5 +1,6 @@
 #pragma once
 #include "IR/Instructions.hpp"
+#include "Statements/Statements.hpp"
 
 namespace ag {
 class Param : public Instructions {
@@ -8,6 +9,9 @@ public:
 
   virtual std::string
   to_string() override;
+
+  virtual void
+  generate_code(CodeGenContext&) override;
 
   std::string m_name;
 };

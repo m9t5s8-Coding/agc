@@ -108,11 +108,11 @@ FunctionStatement::analyze_semantics(Parser& parser) {
 }
 
 void
-FunctionStatement::generate_ir(CodeGenContext& context,
-                               Parser&         parser) {
-  CodeGenContext func_context;
+FunctionStatement::generate_ir(LabelCounters& counter,
+                               Parser&        parser) {
+  // LabelCounters func_counter;
   parser.add_instructios(AG_cscope<Label>(generate_function_label(m_function_name, m_parameters)));
-  m_function_body->generate_ir(func_context, parser);
+  m_function_body->generate_ir(counter, parser);
 }
 
 } // namespace ag

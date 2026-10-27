@@ -119,7 +119,7 @@ public:
   get_type();
 
   virtual std::string
-  generate_ir(CodeGenContext& context,
+  generate_ir(LabelCounters& counter,
               Parser&         parser) {
     return "";
   }
@@ -158,7 +158,7 @@ public:
                     const SourceLocation&) override;
 
   virtual std::string
-  generate_ir(CodeGenContext& context,
+  generate_ir(LabelCounters& counter,
               Parser&         parser) override;
 
   BIN_OPERATOR         bin_operator = BIN_OPERATOR::NONE;
@@ -186,7 +186,7 @@ public:
                     const SourceLocation&) override;
 
   virtual std::string
-  generate_ir(CodeGenContext& context,
+  generate_ir(LabelCounters& counter,
               Parser&         parser) override {
     return "";
   }
@@ -213,7 +213,7 @@ public:
                     const SourceLocation&) override;
 
   virtual std::string
-  generate_ir(CodeGenContext& context,
+  generate_ir(LabelCounters& counter,
               Parser&         parser) override;
 
   std::string_view value;
@@ -241,7 +241,7 @@ public:
   get_type() override;
 
   virtual std::string
-  generate_ir(CodeGenContext& context,
+  generate_ir(LabelCounters& counter,
               Parser&         parser) override {
     return "";
   }
@@ -266,7 +266,7 @@ public:
   get_type() override;
 
   virtual std::string
-  generate_ir(CodeGenContext& context,
+  generate_ir(LabelCounters& counter,
               Parser&         parser) override {
     return "";
   }
@@ -291,7 +291,7 @@ public:
   }
 
   virtual std::string
-  generate_ir(CodeGenContext& context,
+  generate_ir(LabelCounters& counter,
               Parser&         parser) override {
     return "";
   }

@@ -23,21 +23,21 @@ WhileStatement::ParseWhile(Parser& parser) {
   return while_stmt;
 }
 void
-WhileStatement::generate_ir(CodeGenContext& context,
+WhileStatement::generate_ir(LabelCounters& counter,
                             Parser&         parser) {
-  auto cond_l = context.block_label++;
-  auto then_l = context.block_label++;
-  auto end_l  = context.block_label++;
+  auto cond_l = counter.block_label++;
+  auto then_l = counter.block_label++;
+  auto end_l  = counter.block_label++;
 
   auto str = 'b' + std::to_string(cond_l);
   parser.add_instructios(AG_cscope<Label>(str));
-  auto cond = m_condition->generate_ir(context, parser);
+  auto cond = m_condition->generate_ir(counter, parser);
 
   str = 'b' + std::to_string(end_l);
   parser.add_instructios(AG_cscope<CondJump>(cond, str));
   str = 'b' + std::to_string(then_l);
   parser.add_instructios(AG_cscope<Label>(str));
-  m_while_body->generate_ir(context, parser);
+  m_while_body->generate_ir(counter, parser);
 
   str = 'b' + std::to_string(cond_l);
   parser.add_instructios(AG_cscope<Jump>(str));

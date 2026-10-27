@@ -26,8 +26,8 @@ ExpressionStatement::analyze_semantics(Parser& parser) {
 }
 
 void
-ExpressionStatement::generate_ir(CodeGenContext& context,
+ExpressionStatement::generate_ir(LabelCounters& counter,
                                  Parser&         parser) {
-  m_expression->generate_ir(context, parser);
+  m_expression->generate_ir(counter, parser);
 }
 } // namespace ag

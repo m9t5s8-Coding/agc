@@ -13,7 +13,7 @@ public:
   ParseLet(Parser& parser);
 
   virtual void
-  generate_ir(CodeGenContext&,
+  generate_ir(LabelCounters&,
               Parser&) override;
 
   virtual bool

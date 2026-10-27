@@ -433,13 +433,13 @@ BinaryExpression::analyze_semantics(Parser&               parser,
 }
 
 std::string
-BinaryExpression::generate_ir(CodeGenContext& context,
+BinaryExpression::generate_ir(LabelCounters& counter,
                               Parser&         parser) {
-  auto r = right->generate_ir(context, parser);
+  auto r = right->generate_ir(counter, parser);
   if (bin_operator == BIN_OPERATOR::ASSIGN_TO) {
     auto l = dynamic_cast<PrimaryExpression*>(left.get());
     if (l) {
-      // context.text << l->get_value() << " = " << r << '\n';
+      // counter.text << l->get_value() << " = " << r << '\n';
       auto left_value = std::string(l->get_value());
       auto instr      = AG_cscope<Assign>(r, left_value);
       parser.add_instructios(std::move(instr));
@@ -447,16 +447,16 @@ BinaryExpression::generate_ir(CodeGenContext& context,
     }
     return "";
   }
-  auto        l    = left->generate_ir(context, parser);
-  std::string temp = "t" + std::to_string(context.temp_label++);
-  // context.text << temp << " = " << l << ' ' << to_symbol(bin_operator) << " " << r << '\n';
+  auto        l    = left->generate_ir(counter, parser);
+  std::string temp = "t" + std::to_string(counter.temp_label++);
+  // counter.text << temp << " = " << l << ' ' << to_symbol(bin_operator) << " " << r << '\n';
   auto instr = AG_cscope<Binary>(temp, l, r, bin_operator);
   parser.add_instructios(std::move(instr));
   return temp;
 }
 
 std::string
-PrimaryExpression::generate_ir(CodeGenContext& context,
+PrimaryExpression::generate_ir(LabelCounters& counter,
                                Parser&         parser) {
   if (primary_type == PrimitiveType::STRING) {
     return "str" + std::to_string(index);

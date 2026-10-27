@@ -40,12 +40,12 @@ LetStatement::ParseLet(Parser& parser) {
 }
 
 void
-LetStatement::generate_ir(CodeGenContext& context,
+LetStatement::generate_ir(LabelCounters& counter,
                           Parser&         parser) {
   if (!m_expr)
     return;
 
-  auto expr = m_expr->generate_ir(context, parser);
+  auto expr = m_expr->generate_ir(counter, parser);
   parser.add_instructios(AG_cscope<Assign>(expr, std::string(m_name)));
 }
 

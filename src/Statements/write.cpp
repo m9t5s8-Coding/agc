@@ -31,21 +31,21 @@ WriteStatement::ParseWrite(Parser& parser) {
 }
 
 void
-WriteStatement::generate_ir(CodeGenContext& context,
+WriteStatement::generate_ir(LabelCounters& counter,
                             Parser&         parser) {
   {
-    auto exp = m_buffer->generate_ir(context, parser);
+    auto exp = m_buffer->generate_ir(counter, parser);
     if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_buffer.get());
         bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
-      exp = bin_expr->left->generate_ir(context, parser);
+      exp = bin_expr->left->generate_ir(counter, parser);
     }
     parser.add_instructios(AG_cscope<Param>(exp));
   }
   {
-    auto exp = m_buffer_size->generate_ir(context, parser);
+    auto exp = m_buffer_size->generate_ir(counter, parser);
     if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_buffer_size.get());
         bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
-      exp = bin_expr->left->generate_ir(context, parser);
+      exp = bin_expr->left->generate_ir(counter, parser);
     }
     parser.add_instructios(AG_cscope<Param>(exp));
   }
