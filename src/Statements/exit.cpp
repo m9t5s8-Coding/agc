@@ -34,7 +34,7 @@ ExitStatement::generate_ir(LabelCounters& counter,
       bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
     exp = bin_expr->left->generate_ir(counter, parser);
   }
-  parser.add_instructios(AG_cscope<Param>(exp));
+  parser.add_instructios(AG_cscope<Param>(exp, counter.function_index));
   parser.add_instructios(AG_cscope<FunctionCall>("__ag_exit"));
 }
 

@@ -30,6 +30,9 @@ public:
   virtual bool
   analyze_semantics(Parser& parser) override;
 
+  bool
+  register_function(Parser& parser);
+
   void
   add_parameter(FunctionParameter& param) {
     m_parameters.emplace_back(std::move(param));

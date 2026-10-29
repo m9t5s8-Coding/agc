@@ -1,0 +1,21 @@
+#pragma once
+#include "IR/Instructions.hpp"
+#include "Statements/Statements.hpp"
+
+namespace ag {
+class FunctionLabel : public Instructions {
+public:
+  FunctionLabel(const std::string& name,
+                int                index)
+      : Instructions(index),
+        m_name(name) {}
+
+  virtual std::string
+  to_string() override;
+
+  virtual void
+  generate_code(CodeGenContext&) override;
+
+  std::string m_name;
+};
+} // namespace ag

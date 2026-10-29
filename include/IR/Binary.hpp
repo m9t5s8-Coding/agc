@@ -9,8 +9,10 @@ public:
   Binary(const std::string& store_to,
          const std::string& left,
          const std::string& right,
-         BIN_OPERATOR       bn_op)
-      : m_store_to(store_to),
+         BIN_OPERATOR       bn_op,
+         int                index)
+      : Instructions(index),
+        m_store_to(store_to),
         m_left(left),
         m_right(right),
         m_operator(bn_op) {}

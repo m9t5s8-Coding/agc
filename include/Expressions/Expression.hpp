@@ -258,18 +258,18 @@ public:
 
   virtual bool
   analyze_semantics(Parser&,
-                    const SourceLocation&) override {
-    return true;
-  }
+                    const SourceLocation&) override;
 
   virtual PrimitiveType
   get_type() override;
 
   virtual std::string
   generate_ir(LabelCounters& counter,
-              Parser&         parser) override {
-    return "";
-  }
+              Parser&         parser) override;
+
+private:
+  std::string    m_label;
+  PrimitiveType  m_return_type = PrimitiveType::VOID;
 };
 
 class IndexExpression : public Expression {

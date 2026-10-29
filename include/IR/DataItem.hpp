@@ -6,8 +6,10 @@ namespace ag {
 class DataItem : public Instructions {
 public:
   DataItem(const std::string& name,
-           const std::string& value)
-      : m_name(name),
+           const std::string& value,
+           int                index = -1)
+      : Instructions(index),
+        m_name(name),
         m_value(value) {}
 
   virtual std::string

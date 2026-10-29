@@ -5,7 +5,10 @@
 namespace ag {
 class Jump : public Instructions {
 public:
-  Jump(const std::string& name) : m_name(name) {}
+  Jump(const std::string& name,
+       int                index = -1)
+      : Instructions(index),
+        m_name(name) {}
 
   virtual std::string
   to_string() override;

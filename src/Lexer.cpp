@@ -1,7 +1,9 @@
 #include "Lexer.hpp"
 
 #include "Token.hpp"
+#include "error_msg.hpp"
 
+#include <format>
 #include <iostream>
 #include <utility>
 
@@ -61,12 +63,13 @@ Lexer::scan_char(const char c) {
   }
 
   case '#': {
-    while (peek() != '\n') {
+    // A line comment may end at a newline or directly at EOF.
+    while (m_index < code_size() && m_source_code[m_index] != '\n')
       increase();
-    }
 
-    increase();
-    process_new_line();
+    if (m_index < code_size() && m_source_code[m_index] == '\n')
+      process_new_line();
+
     return true;
   }
 
@@ -317,21 +320,100 @@ Lexer::create_keyword(const char c) {
 
 void
 Lexer::create_string_literal() {
-  // auto is_ascii = [](const char c) {
-  //   return c != '"' && c >= 32 && c <= 126;
-  // };
+  // On entry m_index points at the first character after the opening quote.
+  // Leave m_index on the closing quote; tokenize() advances past it.
+  const uint32_t start_line   = m_current_line;
+  const uint32_t start_column = m_current_column > 0 ? m_current_column - 1 : 0;
+  bool           closed       = false;
+  std::string    decoded;
 
-  if (peek() == '"') {
-    add_token({TokenName::AG_STRING_LITERAL});
-    return;
+  while (m_index < code_size()) {
+    const char current = m_source_code[m_index];
+
+    if (current == '"') {
+      closed = true;
+      break;
+    }
+
+    if (current == '\\') {
+      if (m_index + 1 >= code_size()) {
+        decoded.push_back('\\');
+        ++m_index;
+        ++m_current_column;
+        break;
+      }
+
+      const char escaped = m_source_code[m_index + 1];
+      switch (escaped) {
+      case 'n':
+        decoded.push_back('\n');
+        break;
+      case 'r':
+        decoded.push_back('\r');
+        break;
+      case 't':
+        decoded.push_back('\t');
+        break;
+      case '0':
+        decoded.push_back('\0');
+        break;
+      case 'a':
+        decoded.push_back('\a');
+        break;
+      case 'b':
+        decoded.push_back('\b');
+        break;
+      case 'f':
+        decoded.push_back('\f');
+        break;
+      case 'v':
+        decoded.push_back('\v');
+        break;
+      case '\\':
+        decoded.push_back('\\');
+        break;
+      case '"':
+        decoded.push_back('"');
+        break;
+      case '\'':
+        decoded.push_back('\'');
+        break;
+      default:
+        // Keep unknown escapes as their escaped character, e.g. \q -> q.
+        decoded.push_back(escaped);
+        break;
+      }
+
+      m_index += 2;
+      m_current_column += 2;
+      continue;
+    }
+
+    decoded.push_back(current);
+    ++m_index;
+
+    if (current == '\n') {
+      ++m_current_line;
+      m_current_column = 0;
+      m_line_starts.push_back(m_index);
+    } else {
+      ++m_current_column;
+    }
   }
-  m_buffer = get();
-  clear_buffer();
-  while (peek() != '"') {
-    consume();
+
+  if (!closed) {
+    const std::string line_text(get_line_text(start_line));
+    m_error_message += std::format("{}:{}: {}\n   {}\n    {}^\n",
+                                   m_filename,
+                                   start_line,
+                                   error::UnterminatedString,
+                                   line_text,
+                                   std::string(start_column, ' '));
   }
-  add_token({TokenName::AG_STRING_LITERAL, {m_buffer, buffer_size()}});
-  increase();
+
+  m_decoded_strings.push_back(std::move(decoded));
+  const std::string& stored = m_decoded_strings.back();
+  add_token({TokenName::AG_STRING_LITERAL, std::string_view(stored)});
   clear_buffer();
 }
 

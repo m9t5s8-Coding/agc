@@ -74,6 +74,7 @@ inline constexpr std::string_view ExpectedAt              = "\"Expected: '@'\"";
 inline constexpr std::string_view ExpectedHash            = "\"Expected: '#'\"";
 inline constexpr std::string_view ExpectedUnderscore      = "\"Expected: '_'\"";
 inline constexpr std::string_view ExpectedAfterReturnType = "\"Expected '{' or ';' after return type\"";
+inline constexpr std::string_view ExpectedAfterParameters  = "\"Expected '->', '{' or ';' after parameter list\"";
 
 // ============================================================
 // Expected: grammar constructs
@@ -130,6 +131,7 @@ inline constexpr std::string_view RedefinitionOfType     = "\"Redefinition of ty
 // ============================================================
 inline constexpr std::string_view UndefinedIdentifier     = "\"Undefined identifier\"";
 inline constexpr std::string_view UndefinedFunction       = "\"Undefined function\"";
+inline constexpr std::string_view MissingMainFunction     = "\"No 'main' function found\"";
 inline constexpr std::string_view UndefinedType           = "\"Undefined type\"";
 inline constexpr std::string_view UndefinedVariable       = "\"Undefined variable\"";
 inline constexpr std::string_view UndefinedMember         = "\"Undefined member\"";
@@ -139,6 +141,7 @@ inline constexpr std::string_view CannotInferType         = "\"Cannot infer type
 inline constexpr std::string_view InvalidArgumentCount    = "\"Invalid argument count\"";
 inline constexpr std::string_view InvalidArgumentType     = "\"Invalid argument type\"";
 inline constexpr std::string_view InvalidReturnType       = "\"Invalid return type\"";
+inline constexpr std::string_view MissingReturnValue      = "\"Non-void function must return a value\"";
 inline constexpr std::string_view InvalidAssignmentError  = "\"Invalid assignment error\"";
 inline constexpr std::string_view MissingReturnStatement  = "\"Missing return statement\"";
 inline constexpr std::string_view UnreachableCode         = "\"Unreachable code\"";

@@ -2,6 +2,9 @@
 #include "IR/Assign.hpp"
 #include "IR/Binary.hpp"
 #include "IR/DataItem.hpp"
+#include "IR/FunctionCall.hpp"
+#include "IR/IRTable.hpp"
+#include "IR/Param.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
@@ -189,6 +192,13 @@ Expression::parse_pratt(Parser& parser,
     }
   }
 
+  // Function calls bind tighter than every binary operator.
+  while (parser.check(TokenName::AG_LEFT_PAREN)) {
+    left = CallExpression::parse(parser, std::move(left));
+    if (!left)
+      return nullptr;
+  }
+
   TokenName temp_token;
   while (true) {
     if (!parser.check_one_of(binary_list, &temp_token)) {
@@ -265,7 +275,97 @@ IndexExpression::get_type() {
 
 PrimitiveType
 CallExpression::get_type() {
-  return PrimitiveType::VOID;
+  return m_return_type;
+}
+
+bool
+CallExpression::analyze_semantics(Parser&               parser,
+                                  const SourceLocation& location) {
+  auto* function_name = dynamic_cast<PrimaryExpression*>(callee.get());
+  if (!function_name || function_name->primary_type != PrimitiveType::IDENTIFIER) {
+    print_error(error::ExpectedFunctionName, parser, location);
+    return false;
+  }
+
+  auto candidates = get_function_table().lookup_all(function_name->get_value());
+  if (candidates.empty()) {
+    print_error(error::UndefinedFunction, parser, location);
+    return false;
+  }
+
+  std::vector<PrimitiveType> argument_types;
+  argument_types.reserve(arguments.size());
+  for (const auto& argument : arguments) {
+    if (!argument->analyze_semantics(parser, location))
+      return false;
+    argument_types.push_back(argument->get_type());
+  }
+
+  std::optional<FunctionEntry> resolved;
+  bool                         saw_defined_candidate = false;
+  bool                         saw_matching_arity    = false;
+
+  for (const auto& candidate : candidates) {
+    if (!candidate.is_defined)
+      continue;
+    saw_defined_candidate = true;
+
+    if (!candidate.is_variadic && arguments.size() != candidate.parameters.size())
+      continue;
+    saw_matching_arity = true;
+
+    bool compatible = true;
+    for (size_t i = 0; i < arguments.size() && i < candidate.parameters.size(); ++i) {
+      if (argument_types[i] == PrimitiveType::UNEXPECTED ||
+          !is_compatible_datatype(candidate.parameters[i].type.primitive_type, argument_types[i])) {
+        compatible = false;
+        break;
+      }
+    }
+
+    if (compatible) {
+      resolved = candidate;
+      break;
+    }
+  }
+
+  if (!resolved) {
+    if (!saw_defined_candidate)
+      print_error(error::UndefinedFunction, parser, location);
+    else if (!saw_matching_arity)
+      print_error(error::InvalidArgumentCount, parser, location);
+    else
+      print_error(error::InvalidArgumentType, parser, location);
+    return false;
+  }
+
+  m_label       = resolved->label;
+  m_return_type = resolved->return_type ? resolved->return_type->primitive_type : PrimitiveType::VOID;
+  return true;
+}
+
+std::string
+CallExpression::generate_ir(LabelCounters& counter,
+                            Parser&        parser) {
+  // Evaluate every argument first.  A nested call may clobber the argument
+  // registers, so the outer call's Param instructions must be emitted only
+  // after all argument evaluation has finished.
+  std::vector<std::string> argument_values;
+  argument_values.reserve(arguments.size());
+  for (const auto& argument : arguments)
+    argument_values.push_back(argument->generate_ir(counter, parser));
+
+  for (const auto& value : argument_values)
+    parser.add_instructios(AG_cscope<Param>(value, counter.function_index));
+
+  std::string result;
+  if (m_return_type != PrimitiveType::VOID) {
+    result = "t." + std::to_string(counter.temp_label++);
+    get_ir_table().declare_internal(counter.function_index, result, get_type_size(DataType{}));
+  }
+
+  parser.add_instructios(AG_cscope<FunctionCall>(m_label, counter.function_index, result));
+  return result;
 }
 
 PrimitiveType
@@ -434,33 +534,42 @@ BinaryExpression::analyze_semantics(Parser&               parser,
 
 std::string
 BinaryExpression::generate_ir(LabelCounters& counter,
-                              Parser&         parser) {
+                              Parser&        parser) {
   auto r = right->generate_ir(counter, parser);
   if (bin_operator == BIN_OPERATOR::ASSIGN_TO) {
     auto l = dynamic_cast<PrimaryExpression*>(left.get());
     if (l) {
-      // counter.text << l->get_value() << " = " << r << '\n';
-      auto left_value = std::string(l->get_value());
-      auto instr      = AG_cscope<Assign>(r, left_value);
+      // left->generate_ir() translates the source name to its unique IR name.
+      auto left_value = left->generate_ir(counter, parser);
+      auto instr      = AG_cscope<Assign>(r, left_value, counter.function_index);
       parser.add_instructios(std::move(instr));
       return left_value;
     }
     return "";
   }
   auto        l    = left->generate_ir(counter, parser);
-  std::string temp = "t" + std::to_string(counter.temp_label++);
+  std::string temp = "t." + std::to_string(counter.temp_label++);
+  // The temporary is a real value at runtime, so it needs its own stack slot
+  // in the current function's IR table just like a declared variable.
+  get_ir_table().declare_internal(counter.function_index, temp, get_type_size(DataType{}));
   // counter.text << temp << " = " << l << ' ' << to_symbol(bin_operator) << " " << r << '\n';
-  auto instr = AG_cscope<Binary>(temp, l, r, bin_operator);
+  auto instr = AG_cscope<Binary>(temp, l, r, bin_operator, counter.function_index);
   parser.add_instructios(std::move(instr));
   return temp;
 }
 
 std::string
 PrimaryExpression::generate_ir(LabelCounters& counter,
-                               Parser&         parser) {
+                               Parser&        parser) {
   if (primary_type == PrimitiveType::STRING) {
-    return "str" + std::to_string(index);
+    return "str." + std::to_string(index);
   }
+
+  if (primary_type == PrimitiveType::IDENTIFIER) {
+    if (auto variable = get_ir_table().lookup_source(counter.function_index, value))
+      return variable->name;
+  }
+
   return std::string(value);
 }
 

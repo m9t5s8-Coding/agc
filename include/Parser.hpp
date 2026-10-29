@@ -4,6 +4,7 @@
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 #include "Token.hpp"
+#include "error_msg.hpp"
 #include <initializer_list>
 #include <vector>
 
@@ -17,6 +18,18 @@ public:
   set_lexer(Lexer& lexer) {
     m_lexer  = &lexer;
     m_tokens = std::move(lexer.get_tokens());
+
+    // EOF is represented by a synthetic token so diagnostics at the end of
+    // the file still have a useful line and column.
+    m_EOToken.token_name = TokenName::AG_EOF;
+    m_EOToken.value      = {};
+    m_EOToken.line       = lexer.get_current_line();
+    m_EOToken.column     = lexer.get_current_column();
+
+    if (lexer.has_error()) {
+      m_error_message += lexer.get_error_message();
+      m_invalid_syntax = true;
+    }
   }
 
   // Get Lexer for using its features
@@ -72,6 +85,26 @@ public:
     m_error_message += message;
   }
 
+  const std::string&
+  get_error_message() const {
+    return m_error_message;
+  }
+
+  // Textual IR produced by the IR generation phase.
+  const std::string&
+  get_ir() const {
+    return m_ir_text;
+  }
+
+  // Final assembly produced by the code generation phase.
+  const std::string&
+  get_assembly() const {
+    return m_assembly_text;
+  }
+
+  std::string
+  to_json() const;
+
   // Check any one of token and return matched one
   bool
   check_one_of(std::initializer_list<TokenName> tokens,
@@ -87,10 +120,11 @@ public:
     return false;
   }
 
-  // Advance the cursor
+  // Advance the cursor, but never move past the synthetic EOF token.
   void
   advance() {
-    ++m_index;
+    if (m_index < tokens_size())
+      ++m_index;
   }
 
   // Match the current token advance if matched
@@ -119,7 +153,7 @@ public:
   expect(TokenName              token,
          const std::string_view error_message) {
     if (!match(token)) {
-      print_error(error_message, *this);
+      print_error(is_at_end() ? error::UnexpectedEndOfFile : error_message, *this);
       return false;
     }
     return true;
@@ -131,7 +165,7 @@ public:
                 const std::string_view           error_message,
                 TokenName*                       matched = nullptr) {
     if (!match_one_of(tokens, matched)) {
-      print_error(error_message, *this);
+      print_error(is_at_end() ? error::UnexpectedEndOfFile : error_message, *this);
       return false;
     }
     return true;
@@ -159,10 +193,33 @@ public:
     return (m_index + offset) < tokens_size();
   }
 
+  // True once all real tokens have been consumed.
+  bool
+  is_at_end() const {
+    return !is_valid() || current_token().token_name == TokenName::AG_EOF;
+  }
+
   // Is the syntax valid
   bool
   is_syntax_valid() const {
     return m_invalid_syntax == false;
+  }
+
+  // Return-type context for the function body currently being checked.
+  void
+  push_function_return_type(const DataType& type) {
+    m_function_return_types.push_back(type);
+  }
+
+  void
+  pop_function_return_type() {
+    if (!m_function_return_types.empty())
+      m_function_return_types.pop_back();
+  }
+
+  const DataType*
+  current_function_return_type() const {
+    return m_function_return_types.empty() ? nullptr : &m_function_return_types.back();
   }
 
   void
@@ -191,7 +248,11 @@ private:
   bool         m_invalid_syntax = false;
   std::string  m_output_file;
   std::string  m_error_message;
+  std::string  m_ir_text;
+  std::string  m_assembly_text;
   OutputFormat m_output_format = OutputFormat::NONE;
+
+  std::vector<DataType> m_function_return_types;
 
   std::vector<AG_scope<Statements>>   m_statements;
   std::vector<AG_scope<Instructions>> m_instructions;

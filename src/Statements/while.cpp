@@ -24,7 +24,7 @@ WhileStatement::ParseWhile(Parser& parser) {
 }
 void
 WhileStatement::generate_ir(LabelCounters& counter,
-                            Parser&         parser) {
+                            Parser&        parser) {
   auto cond_l = counter.block_label++;
   auto then_l = counter.block_label++;
   auto end_l  = counter.block_label++;
@@ -34,7 +34,7 @@ WhileStatement::generate_ir(LabelCounters& counter,
   auto cond = m_condition->generate_ir(counter, parser);
 
   str = 'b' + std::to_string(end_l);
-  parser.add_instructios(AG_cscope<CondJump>(cond, str));
+  parser.add_instructios(AG_cscope<CondJump>(cond, str, counter.function_index));
   str = 'b' + std::to_string(then_l);
   parser.add_instructios(AG_cscope<Label>(str));
   m_while_body->generate_ir(counter, parser);

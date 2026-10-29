@@ -1,4 +1,5 @@
 #include "IR/CondJump.hpp"
+#include "IR/Operand.hpp"
 #include "Statements/Statements.hpp"
 #include <format>
 
@@ -9,6 +10,10 @@ CondJump::to_string() {
 }
 
 void
-CondJump::generate_code(CodeGenContext&) {}
+CondJump::generate_code(CodeGenContext& context) {
+  context.text << std::format("\tmov rax, {}\n", resolve_operand(m_function_index, m_cond));
+  context.text << "\ttest rax, rax\n";
+  context.text << std::format("\tjz {}\n", m_false_block);
+}
 
 } // namespace ag

@@ -6,6 +6,7 @@
 namespace ag {
 enum class TokenName {
   AG_NONE,
+  AG_EOF,
 
   AG_FUNC,
   AG_IDENTIFIER,

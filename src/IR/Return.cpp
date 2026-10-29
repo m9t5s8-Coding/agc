@@ -1,4 +1,5 @@
 #include "IR/Return.hpp"
+#include "IR/Operand.hpp"
 #include "Statements/Statements.hpp"
 #include <format>
 
@@ -10,6 +11,10 @@ Return::to_string() {
 
 void
 Return::generate_code(CodeGenContext& context) {
+  if (!m_name.empty())
+    context.text << std::format("\tmov rax, {}\n", resolve_operand(m_function_index, m_name));
+
+  context.text << "\tleave\n";
   context.text << "\tret\n";
 }
 

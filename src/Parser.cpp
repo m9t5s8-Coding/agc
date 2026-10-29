@@ -1,5 +1,6 @@
 #include "Parser.hpp"
 
+#include "IR/IRTable.hpp"
 #include "IR/Instructions.hpp"
 #include "Statements/ExpressionStatement.hpp"
 #include "Statements/Statements.hpp"
@@ -15,9 +16,11 @@
 #include "Statements/while.hpp"
 #include "Statements/write.hpp"
 #include "Token.hpp"
+#include "error_msg.hpp"
 #include "json.hpp"
 
 #include <fstream>
+#include <utility>
 
 namespace ag {
 void
@@ -25,12 +28,32 @@ Parser::parse() {
   LabelCounters  counter;
   CodeGenContext context;
 
-  while (is_valid()) {
-    if (!add_statements(parse_statement())) {
-      m_invalid_syntax = true;
-      break;
+  m_ir_text.clear();
+  m_assembly_text.clear();
+
+  if (!m_invalid_syntax) {
+    while (!is_at_end()) {
+      const size_t position_before_statement = m_index;
+      auto         statement                 = parse_statement();
+
+      if (!add_statements(std::move(statement))) {
+        m_invalid_syntax = true;
+        if (m_error_message.empty()) {
+          print_error(is_at_end() ? error::UnexpectedEndOfFile : error::UnexpectedToken, *this);
+        }
+        break;
+      }
+
+      // A successful parse must consume at least one token.  This guards
+      // against an accidental infinite loop at EOF or on an empty statement.
+      if (m_index == position_before_statement) {
+        m_invalid_syntax = true;
+        if (m_error_message.empty()) {
+          print_error(is_at_end() ? error::UnexpectedEndOfFile : error::UnexpectedToken, *this);
+        }
+        break;
+      }
     }
-    // advance();
   }
 
   if (!m_invalid_syntax) {
@@ -48,8 +71,22 @@ Parser::parse() {
       ptr->generate_ir(counter, *this);
     }
 
+    // The generated `_start` always calls main, so a translation unit without
+    // it cannot produce a runnable program.  Report this at EOF instead of
+    // letting NASM/ld fail later with an unresolved symbol.
+    if (get_ir_table().find_function("main") == nullptr) {
+      m_invalid_syntax = true;
+      print_error(error::MissingMainFunction, *this);
+    }
+  }
+
+  if (!m_invalid_syntax) {
+    // Keep the textual IR around so the driver can write it with -ir.
     for (const auto& instr : m_instructions) {
-      // context.text << instr->to_string();
+      m_ir_text += instr->to_string();
+    }
+
+    for (const auto& instr : m_instructions) {
       instr->generate_code(context);
     }
   }
@@ -62,31 +99,36 @@ Parser::parse() {
        << context.data.str() << "\n\n"
        << "section .text\n"
        << "global _start\n\n"
-       << context.text.str() << '\n'
-       << context.syscall.str();
+       << context.syscall.str() << context.text.str();
   }
+  m_assembly_text = ss.str();
+
+  // Backwards-compatible `agc file.ag -o text|json <file>` mode.
   if (!m_output_file.empty() && m_output_format != OutputFormat::NONE) {
     std::ofstream outfile(m_output_file);
     if (!outfile.is_open()) {
       return;
     }
-    {
-      std::string output_text;
-      if (m_output_format == OutputFormat::JSON) {
-        nlohmann::json j;
-        j["error"]  = m_error_message;
-        j["status"] = !m_invalid_syntax;
-        j["output"] = ss.str();
-        output_text = j.dump(4);
-      } else if (m_output_format == OutputFormat::TEXT) {
-        output_text = ss.str();
-      }
-      outfile << output_text;
-      outfile.close();
-      // system("nasm -f elf64 out.asm -o out.o");
-      // system("ld out.o -o out");
-    }
+
+    if (m_output_format == OutputFormat::JSON)
+      outfile << to_json();
+    else if (m_output_format == OutputFormat::TEXT)
+      outfile << m_assembly_text;
+
+    outfile.close();
   }
+}
+
+std::string
+Parser::to_json() const {
+  nlohmann::json j;
+  j["error"]    = m_error_message;
+  j["status"]   = !m_invalid_syntax;
+  j["ir"]       = m_ir_text;
+  j["assembly"] = m_assembly_text;
+  // Preserve the old JSON field name used by existing clients.
+  j["output"] = m_assembly_text;
+  return j.dump(4);
 }
 
 AG_scope<Statements>

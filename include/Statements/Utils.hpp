@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <format>
 #include <memory>
@@ -152,6 +153,7 @@ struct FunctionParameter {
 
 struct FunctionEntry {
   std::string                    name; // unqualified function name
+  std::string                    label; // mangled assembly/IR label
   std::shared_ptr<DataType>      return_type;
   std::vector<FunctionParameter> parameters;
   bool                           is_variadic = false;
@@ -161,6 +163,30 @@ struct FunctionEntry {
   uint32_t       scope_id = 0; // scope the function body introduces
   SourceLocation location;
 };
+
+// Size of a value when it is kept in a stack slot.  Strings are represented
+// by the address of their data, so they take one machine word.
+inline uint32_t
+get_type_size(const DataType& type) {
+  if (type.size_in_bytes != 0)
+    return static_cast<uint32_t>(type.size_in_bytes);
+
+  switch (type.primitive_type) {
+  case PrimitiveType::CHAR:
+    return 1;
+  case PrimitiveType::FLOAT:
+    return 4;
+  case PrimitiveType::DOUBLE:
+    return 8;
+  case PrimitiveType::INT:
+  case PrimitiveType::STRING:
+  case PrimitiveType::BOOL:
+  case PrimitiveType::USER_DEFINED:
+    return 8;
+  default:
+    return 8;
+  }
+}
 
 inline PrimitiveType
 get_datatypes(const std::string_view keyword) {
@@ -259,12 +285,11 @@ generate_function_label(std::string_view                      function_name,
   for (size_t i = 0; i < parameters.size(); i++) {
     param_str += parameters[i].type.type_name;
     if (i < parameters.size() - 1) {
-      param_str += ", ";
+      param_str += "$";
     }
   }
 
-  // main(int, string);
-  return std::format("{}({})", function_name, param_str);
+  return std::format("{}${}", function_name, param_str);
 }
 
 class Parser;
@@ -290,6 +315,11 @@ public:
   static void
   add_to_instruction(LabelCounters& counter,
                      Parser&        parser);
+
+  static bool
+  find_literal(std::string_view literal) {
+    return std::find(s_literals.begin(), s_literals.end(), literal) != s_literals.end();
+  }
 
 private:
   inline static std::vector<std::string_view> s_literals;

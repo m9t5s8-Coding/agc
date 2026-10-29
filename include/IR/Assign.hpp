@@ -6,8 +6,10 @@ namespace ag {
 class Assign : public Instructions {
 public:
   Assign(const std::string& source,
-         const std::string& destination)
-      : m_source(source),
+         const std::string& destination,
+         int                index)
+      : Instructions(index),
+        m_source(source),
         m_destination(destination) {}
 
   virtual std::string

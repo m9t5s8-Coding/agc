@@ -1,11 +1,13 @@
 #include "Statements/var.hpp"
 #include "Expressions/Expression.hpp"
 #include "IR/Assign.hpp"
+#include "IR/IRTable.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
 #include "SymbolTable.hpp"
 #include "error_msg.hpp"
 #include "macro.hpp"
+#include <iostream>
 
 namespace ag {
 AG_scope<Statements>
@@ -38,12 +40,17 @@ VarStatement::ParseVar(Parser& parser) {
 
 void
 VarStatement::generate_ir(LabelCounters& counter,
-                          Parser&         parser) {
+                          Parser&        parser) {
+  auto variable = get_ir_table().declare_user(counter.function_index,
+                                              std::string(m_name),
+                                              get_type_size(m_datatype));
+  std::string destination = variable ? variable->name : std::string(m_name);
+
   if (!m_expr)
     return;
 
   auto expr = m_expr->generate_ir(counter, parser);
-  parser.add_instructios(AG_cscope<Assign>(expr, std::string(m_name)));
+  parser.add_instructios(AG_cscope<Assign>(expr, destination, counter.function_index));
 }
 
 bool

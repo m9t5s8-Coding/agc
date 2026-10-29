@@ -6,8 +6,10 @@ namespace ag {
 class CondJump : public Instructions {
 public:
   CondJump(const std::string& cond,
-           const std::string& false_block)
-      : m_cond(cond),
+           const std::string& false_block,
+           int                index = -1)
+      : Instructions(index),
+        m_cond(cond),
         m_false_block(false_block) {}
 
   virtual std::string

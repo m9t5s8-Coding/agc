@@ -53,23 +53,23 @@ ReadStatement::analyze_semantics(Parser& parser) {
 
 void
 ReadStatement::generate_ir(LabelCounters& counter,
-                           Parser&         parser) {
-  {
-    auto exp = m_buffer->generate_ir(counter, parser);
-    if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_buffer.get());
-        bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
-      exp = bin_expr->left->generate_ir(counter, parser);
-    }
-    parser.add_instructios(AG_cscope<Param>(exp));
+                           Parser&        parser) {
+  // Evaluate both arguments before loading either argument register.  A call
+  // inside one argument may clobber registers already loaded for the other.
+  auto buffer_exp = m_buffer->generate_ir(counter, parser);
+  if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_buffer.get());
+      bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
+    buffer_exp = bin_expr->left->generate_ir(counter, parser);
   }
-  {
-    auto exp = m_buffer_size->generate_ir(counter, parser);
-    if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_buffer_size.get());
-        bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
-      exp = bin_expr->left->generate_ir(counter, parser);
-    }
-    parser.add_instructios(AG_cscope<Param>(exp));
+
+  auto size_exp = m_buffer_size->generate_ir(counter, parser);
+  if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_buffer_size.get());
+      bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
+    size_exp = bin_expr->left->generate_ir(counter, parser);
   }
+
+  parser.add_instructios(AG_cscope<Param>(buffer_exp, counter.function_index));
+  parser.add_instructios(AG_cscope<Param>(size_exp, counter.function_index));
   parser.add_instructios(AG_cscope<FunctionCall>("__ag_read"));
 }
 

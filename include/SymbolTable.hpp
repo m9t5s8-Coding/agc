@@ -95,9 +95,20 @@ public:
   bool
   declare(const std::string& mangled_name,
           FunctionEntry&     entry) {
-    if (m_functions.count(mangled_name))
-      return false; // function redeclaration
-    m_functions[mangled_name] = std::move(entry);
+    auto existing = m_functions.find(mangled_name);
+    if (existing == m_functions.end()) {
+      m_functions[mangled_name] = std::move(entry);
+      return true;
+    }
+
+    // A prototype followed by a definition is valid.  Two definitions (or two
+    // prototypes) of the same signature are not.
+    if (existing->second.is_defined)
+      return false;
+    if (!entry.is_defined)
+      return false;
+
+    existing->second = std::move(entry);
     return true;
   }
 
@@ -108,6 +119,24 @@ public:
       return it->second;
     }
     return std::nullopt;
+  }
+
+  // Return every overload with the given source name.  The caller filters
+  // them by argument count/type.
+  std::vector<FunctionEntry>
+  lookup_all(std::string_view name) const {
+    std::vector<FunctionEntry> result;
+    for (const auto& [mangled_name, entry] : m_functions) {
+      (void)mangled_name;
+      if (entry.name == name)
+        result.push_back(entry);
+    }
+    return result;
+  }
+
+  void
+  reset() {
+    m_functions.clear();
   }
 
   friend FunctionTable&

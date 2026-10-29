@@ -28,7 +28,7 @@ IfStatement::ParseIf(Parser& parser) {
 }
 void
 IfStatement::generate_ir(LabelCounters& counter,
-                         Parser&         parser) {
+                         Parser&        parser) {
   auto cond    = m_condition->generate_ir(counter, parser);
   auto then_l  = counter.block_label++;
   auto else_l  = m_else_body ? counter.block_label++ : 0;
@@ -36,7 +36,7 @@ IfStatement::generate_ir(LabelCounters& counter,
   auto false_l = m_else_body ? else_l : end_l;
 
   auto str = "b" + std::to_string(false_l);
-  parser.add_instructios(AG_cscope<CondJump>(cond, str));
+  parser.add_instructios(AG_cscope<CondJump>(cond, str, counter.function_index));
 
   str = 'b' + std::to_string(then_l);
   parser.add_instructios(AG_cscope<Label>(str));

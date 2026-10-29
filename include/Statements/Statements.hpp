@@ -32,6 +32,10 @@ struct CodeGenContext {
   std::stringstream bss;
   std::stringstream rodata;
   std::stringstream syscall;
+
+  // Points at the next System V argument register while Param instructions
+  // are being emitted.  FunctionCall resets it after each call.
+  uint32_t arg_index = 0;
 };
 
 struct LabelCounters {
@@ -39,6 +43,7 @@ struct LabelCounters {
   uint32_t string_label = 0;
   uint32_t temp_label   = 0;
   uint32_t block_label  = 0;
+  int      function_index{-1};
 };
 
 enum class EXPR_TYPE { LITERAL, IDENTIFIER, COMPLEX_RUNTIME };

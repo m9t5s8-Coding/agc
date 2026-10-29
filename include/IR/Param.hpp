@@ -5,7 +5,10 @@
 namespace ag {
 class Param : public Instructions {
 public:
-  Param(const std::string& name) : m_name(name) {}
+  Param(const std::string& name,
+        int                index)
+      : Instructions(index),
+        m_name(name) {}
 
   virtual std::string
   to_string() override;

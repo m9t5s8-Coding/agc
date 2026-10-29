@@ -1,0 +1,21 @@
+func main() -> int {
+  let greeting : string = "Hello from AGC!\n";
+  var limit : int = 10;
+  var sum : int = 0;
+  var i : int = 1;
+
+  write(greeting, 16);
+
+  while (i <= limit) {
+    sum = sum + i * i;
+    i = i + 1;
+  }
+
+  if (sum > 300) {
+    write("sum is greater than 300\n", 24);
+  } else {
+    write("sum is 300 or less\n", 19);
+  }
+
+  return(sum % 251);
+}
