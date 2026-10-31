@@ -3,6 +3,7 @@
 #include "Token.hpp"
 #include "error_msg.hpp"
 
+#include <algorithm>
 #include <format>
 #include <iostream>
 #include <utility>
@@ -18,6 +19,7 @@ Lexer::contains(const std::string_view str_view,
 
       {"exit", {TokenName::AG_EXIT}},
       {"func", {TokenName::AG_FUNC}},
+      {"operator", {TokenName::AG_OPERATOR}},
       {"return", {TokenName::AG_RETURN}},
       {"write", {TokenName::AG_WRITE}},
       {"read", {TokenName::AG_READ}},
@@ -47,9 +49,26 @@ void
 Lexer::tokenize() {
   m_line_starts.push_back(0);
   while (m_index < code_size()) {
+    m_token_start_line   = m_current_line;
+    m_token_start_column = m_current_column;
+
     const char c = m_source_code[m_index];
+
+    // Newlines are handled here so every scanner path leaves the cursor on
+    // its last character and the next line always starts at column 0.
+    if (c == '\n') {
+      process_new_line();
+      ++m_index;
+      continue;
+    }
+
     if (!scan_char(c))
       create_keyword(c);
+
+    // Comments stop on the newline; let the branch above consume it.
+    if (m_index < code_size() && m_source_code[m_index] == '\n')
+      continue;
+
     increase();
   }
 }
@@ -57,18 +76,11 @@ Lexer::tokenize() {
 bool
 Lexer::scan_char(const char c) {
   switch (c) {
-  case '\n': {
-    process_new_line();
-    return true;
-  }
-
   case '#': {
-    // A line comment may end at a newline or directly at EOF.
+    // Leave the cursor on the newline (or at EOF) so tokenize() can update
+    // the line table uniformly.
     while (m_index < code_size() && m_source_code[m_index] != '\n')
       increase();
-
-    if (m_index < code_size() && m_source_code[m_index] == '\n')
-      process_new_line();
 
     return true;
   }
@@ -403,12 +415,22 @@ Lexer::create_string_literal() {
 
   if (!closed) {
     const std::string line_text(get_line_text(start_line));
-    m_error_message += std::format("{}:{}: {}\n   {}\n    {}^\n",
+
+    // Match the shared diagnostic renderer: a three-space gutter followed by
+    // the source prefix, preserving tabs so the caret lines up in a terminal.
+    std::string caret_prefix;
+    const size_t prefix_size = std::min<size_t>(start_column, line_text.size());
+    for (size_t i = 0; i < prefix_size; ++i)
+      caret_prefix.push_back(line_text[i] == '\t' ? '\t' : ' ');
+    if (start_column > prefix_size)
+      caret_prefix.append(start_column - prefix_size, ' ');
+
+    m_error_message += std::format("{}:{}: {}\n   {}\n   {}^\n",
                                    m_filename,
                                    start_line,
                                    error::UnterminatedString,
                                    line_text,
-                                   std::string(start_column, ' '));
+                                   caret_prefix);
   }
 
   m_decoded_strings.push_back(std::move(decoded));

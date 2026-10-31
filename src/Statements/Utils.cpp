@@ -3,40 +3,160 @@
 #include "IR/IRTable.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
+#include "error_msg.hpp"
 #include <format>
+#include <memory>
+#include <optional>
+#include <string>
 
 namespace ag {
+namespace {
+// Shared diagnostic renderer used by every syntax and semantic error so the
+// source line and caret always use the same gutter and tab handling.
+void
+append_diagnostic(Parser&               parser,
+                  const std::string_view error,
+                  uint32_t               line,
+                  uint32_t               column) {
+  if (line == 0) {
+    const auto& token = parser.current_token();
+    line              = token.line;
+    column            = token.column;
+  }
+
+  const std::string_view line_text = parser.get_lexer().get_line_text(line);
+
+  parser.append_error_message(std::format("{}:{}: {}\n", parser.get_filename(), line, error));
+  parser.append_error_message(std::format("   {}\n", line_text));
+
+  // Reproduce the source prefix exactly (tabs included) so the caret sits
+  // under the reported token regardless of indentation.
+  std::string caret = "   ";
+  const size_t prefix_size = std::min<size_t>(column, line_text.size());
+  for (size_t i = 0; i < prefix_size; ++i)
+    caret.push_back(line_text[i] == '\t' ? '\t' : ' ');
+  if (column > prefix_size)
+    caret.append(column - prefix_size, ' ');
+  caret += "^\n";
+  parser.append_error_message(caret);
+}
+} // namespace
+
 void
 print_error(const std::string_view error,
             Parser&                parser,
             const SourceLocation&  location) {
-  const auto line_code = parser.get_lexer().get_line_text(location.line);
-
-  std::string error_msg = std::format("{}:{}: {}\n", parser.get_filename(), location.line, error);
-
-  parser.append_error_message(error_msg);
-  error_msg.clear();
-  error_msg += std::format("   {}\n", parser.get_lexer().get_line_text(location.line));
-  parser.append_error_message(error_msg);
+  append_diagnostic(parser, error, location.line, location.column);
 }
 
 void
 print_error(const std::string_view error,
             Parser&                parser) {
-  const auto& token     = parser.current_token();
-  const auto  line_code = parser.get_lexer().get_line_text(token.line);
+  const auto& token = parser.current_token();
+  append_diagnostic(parser, error, token.line, token.column);
+}
 
-  std::string error_msg = std::format("{}:{}: {}\n", parser.get_filename(), token.line, error);
+std::optional<DataType>
+parse_type(Parser& parser) {
+  if (!parser.check_one_of({TokenName::AG_KEYWORD, TokenName::AG_IDENTIFIER})) {
+    print_error(parser.is_at_end() ? error::UnexpectedEndOfFile : error::ExpectedTypeName,
+                parser);
+    return std::nullopt;
+  }
 
-  parser.append_error_message(error_msg);
-  error_msg.clear();
-  error_msg += std::format("   {}\n", parser.get_lexer().get_line_text(token.line));
-  parser.append_error_message(error_msg);
-  error_msg.clear();
-  error_msg += "    ";
-  error_msg.append(token.column, ' ');
-  error_msg += "^\n";
-  parser.append_error_message(error_msg);
+  DataType type;
+  type.type_name      = parser.current_token().value;
+  type.primitive_type = get_datatypes(type.type_name);
+  parser.advance();
+
+  while (parser.match(TokenName::AG_ASTERISK)) {
+    auto pointee = std::make_shared<DataType>(type);
+
+    DataType pointer;
+    pointer.kind           = TypeKind::POINTER;
+    pointer.primitive_type = PrimitiveType::USER_DEFINED;
+    pointer.pointee        = std::move(pointee);
+    type                   = std::move(pointer);
+  }
+
+  return type;
+}
+
+std::optional<std::string>
+parse_operator_symbol(Parser& parser) {
+  const Token token = parser.current_token();
+
+  auto consume = [&](const std::string_view symbol) -> std::optional<std::string> {
+    parser.advance();
+    return std::string(symbol);
+  };
+
+  switch (token.token_name) {
+  case TokenName::AG_PLUS:
+    return consume("+");
+  case TokenName::AG_MINUS:
+    return consume("-");
+  case TokenName::AG_ASTERISK:
+    return consume("*");
+  case TokenName::AG_SLASH:
+    return consume("/");
+  case TokenName::AG_MODULO:
+    return consume("%");
+  case TokenName::AG_LEFT_SHIFT:
+    return consume("<<");
+  case TokenName::AG_RIGHT_SHIFT:
+    return consume(">>");
+  case TokenName::AG_LESS:
+    return consume("<");
+  case TokenName::AG_LESS_EQUAL:
+    return consume("<=");
+  case TokenName::AG_GREATER:
+    return consume(">");
+  case TokenName::AG_GREATER_EQUAL:
+    return consume(">=");
+  case TokenName::AG_EQUAL_TO:
+    return consume("==");
+  case TokenName::AG_NOT_EQUAL_TO:
+    return consume("!=");
+  case TokenName::AG_REFERENCE:
+    return consume("&");
+  case TokenName::AG_BITWISE_OR:
+    return consume("|");
+  case TokenName::AG_BITWISE_XOR:
+    return consume("^");
+  case TokenName::AG_LOGICAL_AND:
+    return consume("&&");
+  case TokenName::AG_LOGICAL_OR:
+    return consume("||");
+  case TokenName::AG_LOGICAL_NOT:
+    return consume("!");
+  case TokenName::AG_BITWISE_NOT:
+    return consume("~");
+  case TokenName::AG_INCREMENT:
+    return consume("++");
+  case TokenName::AG_DECREMENT:
+    return consume("--");
+  case TokenName::AG_ASSIGN:
+    return consume("=");
+  case TokenName::AG_ADDITION_ASSIGNMENT:
+    return consume("+=");
+  case TokenName::AG_SUBTRACTION_ASSIGNMENT:
+    return consume("-=");
+  case TokenName::AG_MULTIPLY_ASSIGNMENT:
+    return consume("*=");
+  case TokenName::AG_DIVISION_ASSIGNMENT:
+    return consume("/=");
+  case TokenName::AG_MODULO_ASSIGNMENT:
+    return consume("%=");
+  case TokenName::AG_LEFT_BRACKET:
+    parser.advance();
+    if (!parser.expect(TokenName::AG_RIGHT_BRACKET, error::ExpectedRightBracket))
+      return std::nullopt;
+    return std::string("[]");
+  default:
+    print_error(error::ExpectedOperator, parser);
+    return std::nullopt;
+  }
 }
 
 void
@@ -64,5 +184,41 @@ add_system_call_function(CodeGenContext& context) {
 
   context.syscall << std::format(
       "__ag_read:\n\tmov rdx, rsi\n\tmov rsi, rdi\n\tmov rdi, 0\n\tmov rax, 0\n\tsyscall\n\tret\n\n");
+
+  // Heap allocation is backed by anonymous private mappings.  A 16-byte
+  // header stores the requested size so free() does not need a second
+  // argument; the returned pointer starts immediately after the header.
+  context.syscall << "__ag_alloc:\n"
+                     "\tpush rbx\n"
+                     "\tmov rbx, rdi\n"
+                     "\tlea rsi, [rbx + 16]\n"
+                     "\txor edi, edi\n"
+                     "\tmov edx, 3\n"
+                     "\tmov r10d, 0x22\n"
+                     "\tmov r8, -1\n"
+                     "\txor r9d, r9d\n"
+                     "\tmov eax, 9\n"
+                     "\tsyscall\n"
+                     "\ttest rax, rax\n"
+                     "\tjs .alloc_failed\n"
+                     "\tmov [rax], rbx\n"
+                     "\tadd rax, 16\n"
+                     "\tpop rbx\n"
+                     "\tret\n"
+                     ".alloc_failed:\n"
+                     "\txor eax, eax\n"
+                     "\tpop rbx\n"
+                     "\tret\n\n";
+
+  context.syscall << "__ag_free:\n"
+                     "\ttest rdi, rdi\n"
+                     "\tjz .free_done\n"
+                     "\tsub rdi, 16\n"
+                     "\tmov rsi, [rdi]\n"
+                     "\tadd rsi, 16\n"
+                     "\tmov eax, 11\n"
+                     "\tsyscall\n"
+                     ".free_done:\n"
+                     "\tret\n\n";
 }
 } // namespace ag

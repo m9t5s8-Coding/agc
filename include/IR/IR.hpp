@@ -7,6 +7,7 @@
 #include "IR/DataItem.hpp"
 #include "IR/FunctionCall.hpp"
 #include "IR/IRTable.hpp"
+#include "IR/IndexAssign.hpp"
 #include "IR/Jump.hpp"
 #include "IR/Label.hpp"
 #include "IR/Param.hpp"

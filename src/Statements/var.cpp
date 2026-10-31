@@ -14,20 +14,18 @@ AG_scope<Statements>
 VarStatement::ParseVar(Parser& parser) {
   parser.advance();
 
-  auto var_stmt             = AG_cscope<VarStatement>();
-  var_stmt->m_location.line = parser.current_token().line;
+  auto var_stmt = AG_cscope<VarStatement>();
+  var_stmt->m_location = {parser.current_token().line, parser.current_token().column};
 
   AG_EXPECT_GET_ID_OR_RETURN(
       parser, ag::error::ExpectedIdentifier, var_stmt->m_name, nullptr, TokenName::AG_IDENTIFIER);
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_COLON, error::ExpectedColon, nullptr);
 
-  AG_EXPECT_GET_VALUE_OR_RETURN(parser,
-                                ag::error::ExpectedKeyword,
-                                var_stmt->m_datatype,
-                                nullptr,
-                                TokenName::AG_KEYWORD,
-                                TokenName::AG_IDENTIFIER);
+  auto parsed_type = parse_type(parser);
+  if (!parsed_type)
+    return nullptr;
+  var_stmt->m_datatype = std::move(*parsed_type);
 
   if (parser.match(TokenName::AG_ASSIGN)) {
     AG_PARSE_EXPRESSION_OR_RETURN(parser, var_stmt->m_expr, nullptr);
@@ -67,12 +65,12 @@ VarStatement::analyze_semantics(Parser& parser) {
 
   if (!m_expr)
     return true;
-  auto type = m_expr->get_type();
-  if (!m_expr->analyze_semantics(parser, m_location)) {
+  const auto& diagnostic_location = m_expr->source_location(m_location);
+  if (!m_expr->analyze_semantics(parser, diagnostic_location)) {
     return false;
   }
-  if (!is_compatible_datatype(m_datatype.primitive_type, m_expr->get_type())) {
-    print_error(error::IncompatibleTypes, parser, m_location);
+  if (!is_compatible_type(m_datatype, m_expr->get_data_type())) {
+    print_error(error::IncompatibleTypes, parser, diagnostic_location);
     return false;
   }
   return true;

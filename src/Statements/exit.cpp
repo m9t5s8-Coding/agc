@@ -13,10 +13,11 @@ namespace ag {
 
 AG_scope<Statements>
 ExitStatement::ParseExit(Parser& parser) {
+  const Token statement_token = parser.current_token();
   parser.advance();
 
-  auto exit_stmt             = AG_cscope<ExitStatement>();
-  exit_stmt->m_location.line = parser.current_token().line;
+  auto exit_stmt = AG_cscope<ExitStatement>();
+  exit_stmt->m_location = {statement_token.line, statement_token.column};
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, error::ExpectedLeftParen, nullptr);
   AG_PARSE_EXPRESSION_OR_RETURN(parser, exit_stmt->m_exit_expr, nullptr);
@@ -40,11 +41,12 @@ ExitStatement::generate_ir(LabelCounters& counter,
 
 bool
 ExitStatement::analyze_semantics(Parser& parser) {
-  if (!m_exit_expr->analyze_semantics(parser, m_location))
+  const auto& diagnostic_location = m_exit_expr->source_location(m_location);
+  if (!m_exit_expr->analyze_semantics(parser, diagnostic_location))
     return false;
   auto type = m_exit_expr->get_type();
   if (!is_compatible_datatype(PrimitiveType::INT, type)) {
-    print_error(error::IncompatibleTypes, parser, m_location);
+    print_error(error::IncompatibleTypes, parser, diagnostic_location);
     return false;
   }
   return true;

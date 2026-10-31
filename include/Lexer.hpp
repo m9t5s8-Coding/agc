@@ -54,6 +54,8 @@ public:
 
     if (end > start && end <= m_source_code.size() && m_source_code[end - 1] == '\n')
       --end;
+    if (end > start && end <= m_source_code.size() && m_source_code[end - 1] == '\r')
+      --end;
 
     if (start > end || start > m_source_code.size())
       return {};
@@ -104,14 +106,14 @@ private:
 
   void
   add_token(Token&& token) {
-    token.line   = m_current_line;
-    token.column = m_current_column;
+    token.line   = m_token_start_line;
+    token.column = m_token_start_column;
     m_tokens.push_back(std::move(token));
   }
   void
   add_token(Token& token) {
-    token.line   = m_current_line;
-    token.column = m_current_column;
+    token.line   = m_token_start_line;
+    token.column = m_token_start_column;
     m_tokens.push_back(token);
   }
   char
@@ -178,6 +180,12 @@ private:
 
   uint32_t m_current_line   = 1;
   uint32_t m_current_column = 0;
+
+  // Start of the token currently being scanned.  add_token() records these so
+  // diagnostics point at the first character of a token rather than wherever
+  // the scanner happened to stop.
+  uint32_t m_token_start_line   = 1;
+  uint32_t m_token_start_column = 0;
 
   size_t m_index = 0;
 

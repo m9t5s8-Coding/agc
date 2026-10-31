@@ -9,10 +9,11 @@
 namespace ag {
 AG_scope<Statements>
 WhileStatement::ParseWhile(Parser& parser) {
+  const Token statement_token = parser.current_token();
   parser.advance();
 
-  auto while_stmt             = AG_cscope<WhileStatement>();
-  while_stmt->m_location.line = parser.current_token().line;
+  auto while_stmt        = AG_cscope<WhileStatement>();
+  while_stmt->m_location = {statement_token.line, statement_token.column};
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, error::ExpectedLeftParen, nullptr);
   AG_PARSE_EXPRESSION_OR_RETURN(parser, while_stmt->m_condition, nullptr);
@@ -47,7 +48,7 @@ WhileStatement::generate_ir(LabelCounters& counter,
 
 bool
 WhileStatement::analyze_semantics(Parser& parser) {
-  if (!m_condition->analyze_semantics(parser, m_location)) {
+  if (!m_condition->analyze_semantics(parser, m_condition->source_location(m_location))) {
     return false;
   }
   return m_while_body->analyze_semantics(parser);

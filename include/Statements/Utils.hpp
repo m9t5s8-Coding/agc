@@ -168,6 +168,9 @@ struct FunctionEntry {
 // by the address of their data, so they take one machine word.
 inline uint32_t
 get_type_size(const DataType& type) {
+  if (type.kind == TypeKind::POINTER)
+    return 8;
+
   if (type.size_in_bytes != 0)
     return static_cast<uint32_t>(type.size_in_bytes);
 
@@ -256,6 +259,100 @@ is_compatible_datatype(PrimitiveType type,
   return static_cast<DC_VALUE>(token_2_datatype) & static_cast<DC_VALUE>(is_compatible_for);
 }
 
+inline bool
+is_void_pointer_type(const DataType& type) {
+  return type.kind == TypeKind::POINTER && type.pointee &&
+         type.pointee->kind == TypeKind::PRIMITIVE &&
+         type.pointee->primitive_type == PrimitiveType::VOID;
+}
+
+inline bool
+is_compatible_type(const DataType& expected,
+                   const DataType& actual) {
+  if (expected.primitive_type == PrimitiveType::UNEXPECTED ||
+      actual.primitive_type == PrimitiveType::UNEXPECTED)
+    return false;
+
+  // `void*` is the untyped result of the allocation built-ins.  It converts
+  // to and from any pointer, and `string` is represented as a byte pointer.
+  if (is_void_pointer_type(expected) || is_void_pointer_type(actual)) {
+    const auto pointer_like = [](const DataType& type) {
+      return type.kind == TypeKind::POINTER ||
+             type.primitive_type == PrimitiveType::STRING;
+    };
+    return pointer_like(expected) && pointer_like(actual);
+  }
+
+  if (expected.kind == TypeKind::POINTER || actual.kind == TypeKind::POINTER) {
+    if (expected.kind != TypeKind::POINTER || actual.kind != TypeKind::POINTER)
+      return false;
+    if (!expected.pointee || !actual.pointee)
+      return !expected.pointee && !actual.pointee;
+    return is_compatible_type(*expected.pointee, *actual.pointee);
+  }
+
+  if (expected.primitive_type == PrimitiveType::USER_DEFINED ||
+      actual.primitive_type == PrimitiveType::USER_DEFINED) {
+    if (expected.primitive_type != actual.primitive_type)
+      return false;
+    if (!expected.type_name.empty() && !actual.type_name.empty() &&
+        expected.type_name != actual.type_name)
+      return false;
+    return true;
+  }
+
+  if (expected.primitive_type == actual.primitive_type)
+    return true;
+
+  return is_compatible_datatype(expected.primitive_type, actual.primitive_type);
+}
+
+// A stable, assembly-safe spelling for a source type.  Pointers are encoded
+// recursively so `int*` and `int**` get distinct labels.
+inline std::string
+mangle_type_name(const DataType& type) {
+  if (type.kind == TypeKind::POINTER && type.pointee)
+    return mangle_type_name(*type.pointee) + "_ptr";
+
+  if (!type.type_name.empty())
+    return std::string(type.type_name);
+
+  switch (type.primitive_type) {
+  case PrimitiveType::VOID:
+    return "void";
+  case PrimitiveType::INT:
+    return "int";
+  case PrimitiveType::FLOAT:
+    return "float";
+  case PrimitiveType::DOUBLE:
+    return "double";
+  case PrimitiveType::CHAR:
+    return "char";
+  case PrimitiveType::STRING:
+    return "string";
+  case PrimitiveType::BOOL:
+    return "bool";
+  case PrimitiveType::USER_DEFINED:
+    return "user_defined";
+  case PrimitiveType::IDENTIFIER:
+    return "identifier";
+  case PrimitiveType::UNEXPECTED:
+    return "unexpected";
+  }
+  return "unknown";
+}
+
+inline std::string
+type_display_name(const DataType& type) {
+  if (type.kind == TypeKind::POINTER && type.pointee)
+    return type_display_name(*type.pointee) + "*";
+
+  if (!type.type_name.empty())
+    return std::string(type.type_name);
+
+  return mangle_type_name(type);
+}
+
 inline int
 stoi(const std::string& str) {
   int exit_value = -1;
@@ -283,7 +380,7 @@ generate_function_label(std::string_view                      function_name,
                         const std::vector<FunctionParameter>& parameters) {
   std::string param_str;
   for (size_t i = 0; i < parameters.size(); i++) {
-    param_str += parameters[i].type.type_name;
+    param_str += mangle_type_name(parameters[i].type);
     if (i < parameters.size() - 1) {
       param_str += "$";
     }
@@ -301,6 +398,12 @@ void
 print_error(const std::string_view error,
             Parser&                parser,
             const SourceLocation&  location);
+
+std::optional<DataType>
+parse_type(Parser& parser);
+
+std::optional<std::string>
+parse_operator_symbol(Parser& parser);
 
 class LabelCounters;
 class CodeGenContext;

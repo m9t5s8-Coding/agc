@@ -10,10 +10,11 @@
 namespace ag {
 AG_scope<Statements>
 IfStatement::ParseIf(Parser& parser) {
+  const Token statement_token = parser.current_token();
   parser.advance();
 
-  auto if_stmt             = AG_cscope<IfStatement>();
-  if_stmt->m_location.line = parser.current_token().line;
+  auto if_stmt        = AG_cscope<IfStatement>();
+  if_stmt->m_location = {statement_token.line, statement_token.column};
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, error::ExpectedLeftParen, nullptr);
   AG_PARSE_EXPRESSION_OR_RETURN(parser, if_stmt->m_condition, nullptr);
@@ -62,7 +63,7 @@ IfStatement::generate_ir(LabelCounters& counter,
 
 bool
 IfStatement::analyze_semantics(Parser& parser) {
-  if (!m_condition->analyze_semantics(parser, m_location)) {
+  if (!m_condition->analyze_semantics(parser, m_condition->source_location(m_location))) {
     return false;
   }
   auto return_val = m_if_body->analyze_semantics(parser);

@@ -23,6 +23,9 @@ public:
   static AG_scope<Statements>
   ParseFunction(Parser& parser);
 
+  static AG_scope<Statements>
+  ParseOperator(Parser& parser);
+
   virtual void
   generate_ir(LabelCounters&,
               Parser&) override;
@@ -46,10 +49,14 @@ public:
 private:
   using FunctionParameterVec = std::vector<FunctionParameter>;
 
+  std::string
+  function_label() const;
+
   std::string          m_function_name;
   FunctionParameterVec m_parameters;
   DataType             m_return_type;
   AG_scope<Statements> m_function_body;
   bool                 is_declaration = false;
+  bool                 m_is_operator  = false;
 };
 } // namespace ag

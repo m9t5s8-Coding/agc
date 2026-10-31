@@ -23,6 +23,48 @@
 #include <utility>
 
 namespace ag {
+namespace {
+bool
+looks_like_operator_declaration(const Parser& parser) {
+  size_t offset = 1;
+  if (!parser.is_valid(offset))
+    return false;
+
+  const auto first = parser.peek_token(offset).token_name;
+  if (first == TokenName::AG_LEFT_PAREN)
+    return true;
+
+  if (first == TokenName::AG_LEFT_BRACKET) {
+    if (!parser.is_valid(offset + 1) ||
+        parser.peek_token(offset + 1).token_name != TokenName::AG_RIGHT_BRACKET)
+      return false;
+    offset += 2;
+  } else {
+    ++offset;
+  }
+
+  if (!parser.is_valid(offset) ||
+      parser.peek_token(offset).token_name != TokenName::AG_LEFT_PAREN)
+    return false;
+  ++offset;
+
+  if (!parser.is_valid(offset))
+    return false;
+
+  // Zero-parameter operators are invalid, but treating them as declarations
+  // gives a useful arity diagnostic instead of parsing them as member access.
+  if (parser.peek_token(offset).token_name == TokenName::AG_RIGHT_PAREN)
+    return true;
+
+  if (parser.peek_token(offset).token_name != TokenName::AG_IDENTIFIER)
+    return false;
+  ++offset;
+
+  return parser.is_valid(offset) &&
+         parser.peek_token(offset).token_name == TokenName::AG_COLON;
+}
+} // namespace
+
 void
 Parser::parse() {
   LabelCounters  counter;
@@ -153,6 +195,11 @@ Parser::parse_statement() {
   }
   case TokenName::AG_FUNC: {
     return FunctionStatement::ParseFunction(*this);
+  }
+  case TokenName::AG_OPERATOR: {
+    if (looks_like_operator_declaration(*this))
+      return FunctionStatement::ParseOperator(*this);
+    return ExpressionStatement::parse_expression_statement(*this);
   }
   case TokenName::AG_LEFT_BRACE: {
     return BodyStatement::ParseBlock(*this);

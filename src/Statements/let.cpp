@@ -14,21 +14,18 @@ AG_scope<Statements>
 LetStatement::ParseLet(Parser& parser) {
   parser.advance();
 
-  auto let_stmt             = AG_cscope<LetStatement>();
-  let_stmt->m_location.line = parser.current_token().line;
+  auto let_stmt = AG_cscope<LetStatement>();
+  let_stmt->m_location = {parser.current_token().line, parser.current_token().column};
 
   AG_EXPECT_GET_ID_OR_RETURN(
       parser, ag::error::ExpectedIdentifier, let_stmt->m_name, nullptr, TokenName::AG_IDENTIFIER);
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_COLON, error::ExpectedColon, nullptr);
 
-  AG_EXPECT_GET_VALUE_OR_RETURN(parser,
-                                ag::error::ExpectedKeyword,
-                                let_stmt->m_datatype,
-                                nullptr,
-                                TokenName::AG_KEYWORD,
-                                TokenName::AG_IDENTIFIER);
-
+  auto parsed_type = parse_type(parser);
+  if (!parsed_type)
+    return nullptr;
+  let_stmt->m_datatype           = std::move(*parsed_type);
   let_stmt->m_datatype.is_const = true;
 
   if (parser.match(TokenName::AG_ASSIGN)) {
@@ -68,12 +65,12 @@ LetStatement::analyze_semantics(Parser& parser) {
 
   if (!m_expr)
     return true;
-  if (!m_expr->analyze_semantics(parser, m_location)) {
+  const auto& diagnostic_location = m_expr->source_location(m_location);
+  if (!m_expr->analyze_semantics(parser, diagnostic_location)) {
     return false;
   }
-  auto type = m_expr->get_type();
-  if (!is_compatible_datatype(m_datatype.primitive_type, m_expr->get_type())) {
-    print_error(error::IncompatibleTypes, parser, m_location);
+  if (!is_compatible_type(m_datatype, m_expr->get_data_type())) {
+    print_error(error::IncompatibleTypes, parser, diagnostic_location);
     return false;
   }
 

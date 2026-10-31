@@ -5,7 +5,11 @@
 #include "Statements/Utils.hpp"
 #include "Token.hpp"
 #include "error_msg.hpp"
+#include <algorithm>
+#include <deque>
 #include <initializer_list>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace ag {
@@ -20,11 +24,17 @@ public:
     m_tokens = std::move(lexer.get_tokens());
 
     // EOF is represented by a synthetic token so diagnostics at the end of
-    // the file still have a useful line and column.
+    // the file still have a useful line and column.  When the file ends with a
+    // newline, point at the end of the last non-empty line instead of a blank
+    // line that does not exist in the source.
     m_EOToken.token_name = TokenName::AG_EOF;
     m_EOToken.value      = {};
     m_EOToken.line       = lexer.get_current_line();
     m_EOToken.column     = lexer.get_current_column();
+    while (m_EOToken.line > 1 && lexer.get_line_text(m_EOToken.line).empty()) {
+      --m_EOToken.line;
+      m_EOToken.column = static_cast<uint32_t>(lexer.get_line_text(m_EOToken.line).size());
+    }
 
     if (lexer.has_error()) {
       m_error_message += lexer.get_error_message();
@@ -222,6 +232,33 @@ public:
     return m_function_return_types.empty() ? nullptr : &m_function_return_types.back();
   }
 
+  // Operator bodies must not resolve their own implicit operator syntax back
+  // to themselves.  The active label is used as a recursion guard while the
+  // body is semantically checked.
+  void
+  push_operator_context(const std::string& label) {
+    m_active_operators.push_back(label);
+  }
+
+  void
+  pop_operator_context() {
+    if (!m_active_operators.empty())
+      m_active_operators.pop_back();
+  }
+
+  bool
+  is_operator_context_active(std::string_view label) const {
+    return std::find(m_active_operators.begin(), m_active_operators.end(), label) !=
+           m_active_operators.end();
+  }
+
+  // Parser-owned storage for synthesized names such as `operator+`.
+  std::string_view
+  intern_operator_name(const std::string& name) {
+    m_operator_names.push_back(name);
+    return m_operator_names.back();
+  }
+
   void
   add_instructios(AG_scope<Instructions> instruction);
 
@@ -253,6 +290,8 @@ private:
   OutputFormat m_output_format = OutputFormat::NONE;
 
   std::vector<DataType> m_function_return_types;
+  std::vector<std::string> m_active_operators;
+  std::deque<std::string>  m_operator_names;
 
   std::vector<AG_scope<Statements>>   m_statements;
   std::vector<AG_scope<Instructions>> m_instructions;

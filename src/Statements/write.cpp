@@ -15,10 +15,11 @@ namespace ag {
 // use expression and later use expression in that
 AG_scope<Statements>
 WriteStatement::ParseWrite(Parser& parser) {
+  const Token statement_token = parser.current_token();
   parser.advance();
 
-  auto write_statement             = AG_cscope<WriteStatement>();
-  write_statement->m_location.line = parser.current_token().line;
+  auto write_statement = AG_cscope<WriteStatement>();
+  write_statement->m_location = {statement_token.line, statement_token.column};
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, ag::error::ExpectedLeftParen, nullptr);
   AG_PARSE_EXPRESSION_OR_RETURN(parser, write_statement->m_buffer, nullptr);
@@ -54,21 +55,24 @@ WriteStatement::generate_ir(LabelCounters& counter,
 
 bool
 WriteStatement::analyze_semantics(Parser& parser) {
-  if (!m_buffer->analyze_semantics(parser, m_location)) {
+  const auto& buffer_location = m_buffer->source_location(m_location);
+  if (!m_buffer->analyze_semantics(parser, buffer_location)) {
     return false;
   }
-  auto type = m_buffer->get_type();
-  if (!is_compatible_datatype(PrimitiveType::STRING, type)) {
-    print_error(error::IncompatibleTypes, parser, m_location);
+  DataType expected;
+  expected.primitive_type = PrimitiveType::STRING;
+  expected.type_name      = "string";
+  if (!is_compatible_type(expected, m_buffer->get_data_type())) {
+    print_error(error::IncompatibleTypes, parser, buffer_location);
     return false;
   }
 
-  if (!m_buffer_size->analyze_semantics(parser, m_location)) {
+  const auto& size_location = m_buffer_size->source_location(m_location);
+  if (!m_buffer_size->analyze_semantics(parser, size_location)) {
     return false;
   }
-  type = m_buffer_size->get_type();
-  if (!is_compatible_datatype(PrimitiveType::INT, type)) {
-    print_error(error::IncompatibleTypes, parser, m_location);
+  if (!is_compatible_datatype(PrimitiveType::INT, m_buffer_size->get_type())) {
+    print_error(error::IncompatibleTypes, parser, size_location);
     return false;
   }
 

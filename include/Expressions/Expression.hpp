@@ -118,6 +118,9 @@ public:
   virtual PrimitiveType
   get_type();
 
+  virtual DataType
+  get_data_type();
+
   virtual std::string
   generate_ir(LabelCounters& counter,
               Parser&         parser) {
@@ -129,6 +132,15 @@ public:
                     const SourceLocation&) {
     return true;
   }
+
+  // Prefer the node's own token location, falling back to the statement
+  // location supplied by the caller when it was never populated.
+  const SourceLocation&
+  source_location(const SourceLocation& fallback) const {
+    return location.line != 0 ? location : fallback;
+  }
+
+  SourceLocation location;
 };
 
 class BinaryExpression : public Expression {
@@ -153,6 +165,9 @@ public:
   virtual PrimitiveType
   get_type() override;
 
+  virtual DataType
+  get_data_type() override;
+
   virtual bool
   analyze_semantics(Parser&,
                     const SourceLocation&) override;
@@ -164,6 +179,10 @@ public:
   BIN_OPERATOR         bin_operator = BIN_OPERATOR::NONE;
   AG_scope<Expression> left;
   AG_scope<Expression> right;
+  std::string          operator_label;
+  DataType             result_type;
+  bool                 result_type_known = false;
+  bool                 is_string_index   = false;
 };
 
 class UniaryExpression : public Expression {
@@ -181,18 +200,22 @@ public:
   virtual PrimitiveType
   get_type() override;
 
+  virtual DataType
+  get_data_type() override;
+
   virtual bool
   analyze_semantics(Parser&,
                     const SourceLocation&) override;
 
   virtual std::string
   generate_ir(LabelCounters& counter,
-              Parser&         parser) override {
-    return "";
-  }
+              Parser&         parser) override;
 
   AG_scope<Expression> operand;
-  UN_OPERATOR          un_operator;
+  UN_OPERATOR          un_operator = UN_OPERATOR::NONE;
+  std::string          operator_label;
+  DataType             result_type;
+  bool                 result_type_known = false;
 };
 
 class PrimaryExpression : public Expression {
@@ -208,6 +231,9 @@ public:
   virtual PrimitiveType
   get_type() override;
 
+  virtual DataType
+  get_data_type() override;
+
   virtual bool
   analyze_semantics(Parser&,
                     const SourceLocation&) override;
@@ -217,7 +243,7 @@ public:
               Parser&         parser) override;
 
   std::string_view value;
-  PrimitiveType    primary_type;
+  PrimitiveType    primary_type = PrimitiveType::UNEXPECTED;
   size_t           index = 0;
 };
 
@@ -263,13 +289,16 @@ public:
   virtual PrimitiveType
   get_type() override;
 
+  virtual DataType
+  get_data_type() override;
+
   virtual std::string
   generate_ir(LabelCounters& counter,
               Parser&         parser) override;
 
 private:
-  std::string    m_label;
-  PrimitiveType  m_return_type = PrimitiveType::VOID;
+  std::string m_label;
+  DataType    m_result_type;
 };
 
 class IndexExpression : public Expression {

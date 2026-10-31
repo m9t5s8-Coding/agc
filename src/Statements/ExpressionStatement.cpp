@@ -7,9 +7,9 @@
 namespace ag {
 AG_scope<Statements>
 ExpressionStatement::parse_expression_statement(Parser& parser) {
-  auto expr_statement             = AG_cscope<ExpressionStatement>();
-  expr_statement->m_location.line = parser.current_token().line;
-  auto expr                       = Expression::parse_expressions(parser);
+  auto expr_statement = AG_cscope<ExpressionStatement>();
+  expr_statement->m_location = {parser.current_token().line, parser.current_token().column};
+  auto expr = Expression::parse_expressions(parser);
   if (!expr) {
     return nullptr;
   }

@@ -14,11 +14,11 @@ namespace ag {
 
 AG_scope<Statements>
 ReturnStatement::ParseReturn(Parser& parser) {
-  const auto return_line = parser.current_token().line;
+  const Token return_token = parser.current_token();
   parser.advance();
 
-  auto return_stmt             = AG_cscope<ReturnStatement>();
-  return_stmt->m_location.line = return_line;
+  auto return_stmt       = AG_cscope<ReturnStatement>();
+  return_stmt->m_location = {return_token.line, return_token.column};
 
   // `return;` is valid for void functions.  Otherwise the expression may be
   // written either with or without parentheses: `return x;` and
@@ -62,7 +62,7 @@ ReturnStatement::analyze_semantics(Parser& parser) {
     return true;
   }
 
-  if (!m_return_expr->analyze_semantics(parser, m_location))
+  if (!m_return_expr->analyze_semantics(parser, m_return_expr->source_location(m_location)))
     return false;
 
   if (return_type->primitive_type == PrimitiveType::VOID) {
@@ -70,10 +70,10 @@ ReturnStatement::analyze_semantics(Parser& parser) {
     return false;
   }
 
-  const auto expr_type = m_return_expr->get_type();
-  if (expr_type == PrimitiveType::UNEXPECTED ||
-      !is_compatible_datatype(return_type->primitive_type, expr_type)) {
-    print_error(error::IncompatibleTypes, parser, m_location);
+  const auto expr_type = m_return_expr->get_data_type();
+  if (expr_type.primitive_type == PrimitiveType::UNEXPECTED ||
+      !is_compatible_type(*return_type, expr_type)) {
+    print_error(error::IncompatibleTypes, parser, m_return_expr->source_location(m_location));
     return false;
   }
 

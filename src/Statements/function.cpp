@@ -8,7 +8,9 @@
 #include "Token.hpp"
 #include "error_msg.hpp"
 #include "macro.hpp"
+#include <cctype>
 #include <optional>
+#include <string_view>
 
 namespace ag {
 
@@ -22,14 +24,16 @@ parse_function_parameter(Parser& parser) {
   FunctionParameter param;
   while (parser.is_valid()) {
 
-    param.location.line = parser.current_token().line;
+    param.location = {parser.current_token().line, parser.current_token().column};
     AG_EXPECT_GET_ID_OR_RETURN(
         parser, ag::error::ExpectedFunctionName, param.name, std::nullopt, TokenName::AG_IDENTIFIER);
 
     AG_EXPECT_OR_RETURN(parser, TokenName::AG_COLON, ag::error::ExpectedColon, std::nullopt);
 
-    AG_EXPECT_GET_VALUE_OR_RETURN(
-        parser, ag::error::ExpectedKeyword, param.type, std::nullopt, TokenName::AG_KEYWORD, TokenName::AG_IDENTIFIER);
+    auto type = parse_type(parser);
+    if (!type)
+      return std::nullopt;
+    param.type = std::move(*type);
 
     l_parameters.push_back(param);
     if (!parser.match(TokenName::AG_COMMA))
@@ -40,25 +44,110 @@ parse_function_parameter(Parser& parser) {
   return l_parameters;
 }
 
+static std::optional<std::vector<FunctionParameter>>
+parse_parameter_group(Parser& parser) {
+  if (!parser.expect(TokenName::AG_LEFT_PAREN, ag::error::ExpectedLeftParen))
+    return std::nullopt;
+  return parse_function_parameter(parser);
+}
+
 static std::optional<DataType>
 parse_return_type(Parser& parser) {
-  DataType out_value;
-  AG_EXPECT_GET_VALUE_OR_RETURN(
-      parser, ag::error::ExpectedKeyword, out_value, std::nullopt, TokenName::AG_KEYWORD, TokenName::AG_IDENTIFIER);
-  return out_value;
+  return parse_type(parser);
+}
+
+static std::string
+mangle_operator_symbol(const std::string_view symbol) {
+  if (symbol == "+")
+    return "add";
+  if (symbol == "-")
+    return "sub";
+  if (symbol == "*")
+    return "mul";
+  if (symbol == "/")
+    return "div";
+  if (symbol == "%")
+    return "mod";
+  if (symbol == "<<")
+    return "shl";
+  if (symbol == ">>")
+    return "shr";
+  if (symbol == "<")
+    return "lt";
+  if (symbol == "<=")
+    return "le";
+  if (symbol == ">")
+    return "gt";
+  if (symbol == ">=")
+    return "ge";
+  if (symbol == "==")
+    return "eq";
+  if (symbol == "!=")
+    return "ne";
+  if (symbol == "&")
+    return "band";
+  if (symbol == "|")
+    return "bor";
+  if (symbol == "^")
+    return "bxor";
+  if (symbol == "&&")
+    return "land";
+  if (symbol == "||")
+    return "lor";
+  if (symbol == "!")
+    return "lnot";
+  if (symbol == "~")
+    return "bnot";
+  if (symbol == "++")
+    return "inc";
+  if (symbol == "--")
+    return "dec";
+  if (symbol == "[]")
+    return "index";
+  if (symbol == "=")
+    return "assign";
+  if (symbol == "+=")
+    return "add_assign";
+  if (symbol == "-=")
+    return "sub_assign";
+  if (symbol == "*=")
+    return "mul_assign";
+  if (symbol == "/=")
+    return "div_assign";
+  if (symbol == "%=")
+    return "mod_assign";
+
+  std::string mangled = "op";
+  for (const char c : symbol) {
+    if (std::isalnum(static_cast<unsigned char>(c)) || c == '_')
+      mangled.push_back(c);
+    else
+      mangled += std::format("_{:02x}", static_cast<unsigned char>(c));
+  }
+  return mangled;
+}
+
+std::string
+FunctionStatement::function_label() const {
+  if (!m_is_operator)
+    return generate_function_label(m_function_name, m_parameters);
+
+  const std::string_view symbol =
+      m_function_name.size() > 8 ? std::string_view(m_function_name).substr(8) : std::string_view{};
+  return generate_function_label("__agop_" + mangle_operator_symbol(symbol), m_parameters);
 }
 
 AG_scope<Statements>
 FunctionStatement::ParseFunction(Parser& parser) {
   parser.advance();
 
-  auto         function_stmt = AG_cscope<FunctionStatement>();
-  TokenName    temp_token;
-  const auto   function_line = parser.current_token().line;
+  auto        function_stmt = AG_cscope<FunctionStatement>();
+  TokenName   temp_token;
+  const Token function_token = parser.current_token();
 
   AG_EXPECT_GET_ID_OR_RETURN(
       parser, ag::error::ExpectedFunctionName, function_stmt->m_function_name, nullptr, TokenName::AG_IDENTIFIER);
-  function_stmt->m_location.line = function_line;
+  function_stmt->m_location = {function_token.line, function_token.column};
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, ag::error::ExpectedLeftParen, nullptr);
 
@@ -103,11 +192,108 @@ FunctionStatement::ParseFunction(Parser& parser) {
   return function_stmt;
 }
 
+AG_scope<Statements>
+FunctionStatement::ParseOperator(Parser& parser) {
+  const Token operator_token = parser.current_token();
+  parser.advance(); // `operator`
+
+  auto function_stmt           = AG_cscope<FunctionStatement>();
+  function_stmt->m_location    = {operator_token.line, operator_token.column};
+  function_stmt->m_is_operator = true;
+
+  std::string                   symbol;
+  std::vector<FunctionParameter> parameters;
+  TokenName                     temp_token;
+
+  if (parser.check(TokenName::AG_LEFT_PAREN)) {
+    // Infix declaration form:
+    //   operator (left: Type) << (right: Type) -> ReturnType { ... }
+    auto left_parameters = parse_parameter_group(parser);
+    if (!left_parameters)
+      return nullptr;
+    if (left_parameters->size() != 1) {
+      print_error(error::InvalidArgumentCount, parser, function_stmt->m_location);
+      return nullptr;
+    }
+
+    auto parsed_symbol = parse_operator_symbol(parser);
+    if (!parsed_symbol)
+      return nullptr;
+    symbol = std::move(*parsed_symbol);
+
+    auto right_parameters = parse_parameter_group(parser);
+    if (!right_parameters)
+      return nullptr;
+    if (right_parameters->size() != 1) {
+      print_error(error::InvalidArgumentCount, parser, function_stmt->m_location);
+      return nullptr;
+    }
+
+    parameters.push_back(std::move((*left_parameters)[0]));
+    parameters.push_back(std::move((*right_parameters)[0]));
+  } else {
+    // Conventional declaration form:
+    //   operator+(left: Type, right: Type) -> ReturnType { ... }
+    auto parsed_symbol = parse_operator_symbol(parser);
+    if (!parsed_symbol)
+      return nullptr;
+    symbol = std::move(*parsed_symbol);
+
+    auto parsed_parameters = parse_parameter_group(parser);
+    if (!parsed_parameters)
+      return nullptr;
+    parameters = std::move(*parsed_parameters);
+  }
+
+  if (parameters.empty() || parameters.size() > 2) {
+    print_error(error::InvalidArgumentCount, parser, function_stmt->m_location);
+    return nullptr;
+  }
+
+  function_stmt->m_function_name = "operator" + symbol;
+  function_stmt->m_parameters    = std::move(parameters);
+
+  AG_CHECK_ONE_OF_OR_RETURN(parser,
+                            ag::error::ExpectedAfterParameters,
+                            &temp_token,
+                            nullptr,
+                            TokenName::AG_ARROW,
+                            TokenName::AG_LEFT_BRACE,
+                            TokenName::AG_SEMICOLON);
+
+  if (temp_token == TokenName::AG_ARROW) {
+    parser.advance();
+    AG_PARSE_OPT_OR_RETURN(parser, parse_return_type, function_stmt->m_return_type, nullptr);
+
+    AG_CHECK_ONE_OF_OR_RETURN(parser,
+                              ag::error::ExpectedAfterReturnType,
+                              &temp_token,
+                              nullptr,
+                              TokenName::AG_LEFT_BRACE,
+                              TokenName::AG_SEMICOLON);
+  }
+
+  function_stmt->is_declaration = (temp_token == TokenName::AG_SEMICOLON);
+
+  if (!function_stmt->register_function(parser))
+    return nullptr;
+
+  if (function_stmt->is_declaration) {
+    parser.advance();
+    return function_stmt;
+  }
+
+  if (temp_token == TokenName::AG_LEFT_BRACE)
+    AG_PARSE_SCOPE(parser, function_stmt->m_function_body, nullptr);
+
+  return function_stmt;
+}
+
 bool
 FunctionStatement::register_function(Parser& parser) {
   FunctionEntry entry;
   entry.name        = m_function_name;
-  entry.label       = generate_function_label(m_function_name, m_parameters);
+  entry.label       = function_label();
   entry.return_type = std::make_shared<DataType>(m_return_type);
   entry.parameters  = m_parameters;
   entry.is_defined  = !is_declaration;
@@ -135,9 +321,16 @@ FunctionStatement::analyze_semantics(Parser& parser) {
     }
   }
 
+  const bool track_operator = m_is_operator && !is_declaration && m_function_body;
+  if (track_operator)
+    parser.push_operator_context(function_label());
+
   parser.push_function_return_type(m_return_type);
   auto return_val = !m_function_body || m_function_body->analyze_semantics(parser);
   parser.pop_function_return_type();
+
+  if (track_operator)
+    parser.pop_operator_context();
 
   get_symbol_table().exit_scope();
   return return_val;
@@ -149,7 +342,7 @@ FunctionStatement::generate_ir(LabelCounters& counter,
   if (is_declaration || !m_function_body)
     return;
 
-  std::string function_label = generate_function_label(m_function_name, m_parameters);
+  const std::string function_label = this->function_label();
 
   counter.function_index = get_ir_table().insert(m_function_name, function_label);
 

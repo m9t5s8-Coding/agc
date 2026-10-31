@@ -82,6 +82,10 @@ emit_binary_op(CodeGenContext&    context,
   case BIN_OPERATOR::LOGICAL_OR:
     context.text << std::format("\tor rax, {}\n", right);
     break;
+  case BIN_OPERATOR::INDEXING:
+    context.text << std::format("\tmov rcx, {}\n", right);
+    context.text << "\tmovzx rax, byte [rax + rcx]\n";
+    break;
   default:
     break;
   }

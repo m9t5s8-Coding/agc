@@ -9,6 +9,7 @@ enum class TokenName {
   AG_EOF,
 
   AG_FUNC,
+  AG_OPERATOR,
   AG_IDENTIFIER,
   AG_KEYWORD,
 
