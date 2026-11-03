@@ -31,13 +31,17 @@ public:
     if (find(key)) {
       return false;
     }
-    for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); it++) {
+
+    // Declarations belong to the innermost active scope.  The module scope is
+    // the first entry and stays active for the whole translation unit, which
+    // is what makes top-level variables visible inside functions.
+    for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); ++it) {
       if (it->second) {
-        auto& map = it->first;
-        map[key]  = decl_type;
+        it->first[key] = decl_type;
+        return true;
       }
     }
-    return true;
+    return false;
   }
 
   // 0 1 2
@@ -87,7 +91,7 @@ private:
   int64_t               m_current_stack_offset = 0;
   inline static int64_t s_current_scope        = -1;
 
-  SymbolTable() { m_scopes.push_back({}); }
+  SymbolTable() { m_scopes.push_back({{}, true}); }
 };
 
 class FunctionTable {

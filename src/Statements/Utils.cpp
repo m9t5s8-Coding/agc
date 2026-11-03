@@ -1,4 +1,5 @@
 #include "Statements/Utils.hpp"
+#include "Expressions/Expression.hpp"
 #include "IR/DataItem.hpp"
 #include "IR/IRTable.hpp"
 #include "Parser.hpp"
@@ -42,6 +43,34 @@ append_diagnostic(Parser&               parser,
 }
 } // namespace
 
+std::string
+global_initializer(Expression* expression) {
+  if (!expression)
+    return "0";
+
+  if (auto* primary = dynamic_cast<PrimaryExpression*>(expression)) {
+    if (primary->primary_type == PrimitiveType::INT)
+      return std::string(primary->value);
+    if (primary->primary_type == PrimitiveType::STRING)
+      return "str." + std::to_string(primary->index);
+    return "0";
+  }
+
+  if (auto* unary = dynamic_cast<UniaryExpression*>(expression)) {
+    const std::string inner = global_initializer(unary->operand.get());
+    if (unary->un_operator == UN_OPERATOR::NEGATIVE) {
+      // Only negate numeric literals; string labels are addresses and should
+      // not be turned into nonsensical negative values.
+      if (!inner.empty() && inner[0] != 's' && inner[0] != 'g')
+        return "-" + inner;
+    } else if (unary->un_operator == UN_OPERATOR::POSITIVE) {
+      return inner;
+    }
+  }
+
+  return "0";
+}
+
 void
 print_error(const std::string_view error,
             Parser&                parser,
@@ -67,6 +96,15 @@ parse_type(Parser& parser) {
   DataType type;
   type.type_name      = parser.current_token().value;
   type.primitive_type = get_datatypes(type.type_name);
+
+  if (type.primitive_type == PrimitiveType::USER_DEFINED) {
+    if (const auto* definition = get_struct_table().lookup(type.type_name)) {
+      type.kind          = TypeKind::STRUCT;
+      type.size_in_bytes = definition->size_in_bytes;
+      type.alignment     = definition->alignment;
+    }
+  }
+
   parser.advance();
 
   while (parser.match(TokenName::AG_ASTERISK)) {
@@ -148,6 +186,16 @@ parse_operator_symbol(Parser& parser) {
     return consume("/=");
   case TokenName::AG_MODULO_ASSIGNMENT:
     return consume("%=");
+  case TokenName::AG_BITWISE_AND_ASSIGNMENT:
+    return consume("&=");
+  case TokenName::AG_BITWISE_OR_ASSIGNMENT:
+    return consume("|=");
+  case TokenName::AG_BITWISE_XOR_ASSIGNMENT:
+    return consume("^=");
+  case TokenName::AG_LEFT_SHIFT_ASSIGNMENT:
+    return consume("<<=");
+  case TokenName::AG_RIGHT_SHIFT_ASSIGNMENT:
+    return consume(">>=");
   case TokenName::AG_LEFT_BRACKET:
     parser.advance();
     if (!parser.expect(TokenName::AG_RIGHT_BRACKET, error::ExpectedRightBracket))
@@ -220,5 +268,29 @@ add_system_call_function(CodeGenContext& context) {
                      "\tsyscall\n"
                      ".free_done:\n"
                      "\tret\n\n";
+}
+
+StructTable&
+get_struct_table() {
+  static StructTable table;
+  return table;
+}
+
+DataType
+make_struct_type(std::string_view name) {
+  DataType type;
+  type.kind           = TypeKind::STRUCT;
+  type.primitive_type = PrimitiveType::USER_DEFINED;
+  type.type_name      = name;
+
+  if (const auto* definition = get_struct_table().lookup(name)) {
+    // Point at the registry-owned name so types captured by AST nodes remain
+    // valid after parser-local strings are popped.
+    type.type_name     = definition->name;
+    type.size_in_bytes = definition->size_in_bytes;
+    type.alignment     = definition->alignment;
+  }
+
+  return type;
 }
 } // namespace ag

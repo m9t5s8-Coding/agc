@@ -112,6 +112,26 @@ public:
     return m_assembly_text;
   }
 
+  // Textual LLVM IR produced by the optional LLVM backend.
+  const std::string&
+  get_llvm_ir() const {
+    return m_llvm_text;
+  }
+
+  // The LLVM backend is generated on demand so the native NASM path remains
+  // completely independent of it.
+  void
+  set_emit_llvm(bool enabled) {
+    m_emit_llvm = enabled;
+  }
+
+  // Linear IR instructions after the IR generation phase.  The LLVM backend
+  // translates these instructions without needing to walk the AST again.
+  const std::vector<AG_scope<Instructions>>&
+  get_instructions() const {
+    return m_instructions;
+  }
+
   std::string
   to_json() const;
 
@@ -252,6 +272,26 @@ public:
            m_active_operators.end();
   }
 
+  // The parser is inside an `impl Type { ... }` block while method signatures
+  // are parsed.  This lets `self` get the enclosing struct type without making
+  // it a reserved word.
+  void
+  push_impl_type(std::string name) {
+    m_impl_types.push_back(std::move(name));
+  }
+
+  void
+  pop_impl_type() {
+    if (!m_impl_types.empty())
+      m_impl_types.pop_back();
+  }
+
+  const std::string&
+  current_impl_type() const {
+    static const std::string empty;
+    return m_impl_types.empty() ? empty : m_impl_types.back();
+  }
+
   // Parser-owned storage for synthesized names such as `operator+`.
   std::string_view
   intern_operator_name(const std::string& name) {
@@ -287,10 +327,13 @@ private:
   std::string  m_error_message;
   std::string  m_ir_text;
   std::string  m_assembly_text;
+  std::string  m_llvm_text;
+  bool         m_emit_llvm = false;
   OutputFormat m_output_format = OutputFormat::NONE;
 
   std::vector<DataType> m_function_return_types;
   std::vector<std::string> m_active_operators;
+  std::vector<std::string> m_impl_types;
   std::deque<std::string>  m_operator_names;
 
   std::vector<AG_scope<Statements>>   m_statements;

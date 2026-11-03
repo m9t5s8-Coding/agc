@@ -1,0 +1,449 @@
+import ag::io { println, readln, eprintln };
+import ag::math as m;
+import ag::mem { alloc, free };
+import ag::sync { Channel, Mutex };
+import ag::fs;
+
+mod geometry {
+    pub const ORIGIN: int = 0;
+
+    pub func unit() -> float => 1.0;
+}
+
+type Meters = float;
+type Callback = func(int) -> void;
+type Predicate<T> = func(T) -> bool;
+
+extern "c" {
+    func strlen(text: char*) -> int;
+    func stoi(text: char*) -> int;
+}
+
+const MAX: int = 100;
+const MASK: int = 0xFF_FF;
+const FLAGS: int = 0b1010_0110;
+const TABLE: int = comptime fib(10);
+static var counter: int = 0;
+
+comptime func fib(n: int) -> int {
+    if (n < 2) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+struct Point {
+    pub x: int,
+    pub y: int,
+}
+
+impl Point {
+    func origin() -> Self => Point { x: 0, y: 0 };
+
+    func dist(self) -> float {
+        return m::sqrt(self.x * self.x + self.y * self.y);
+    }
+
+    func moved(self, dx: int, dy: int) -> Self {
+        return Point { x: self.x + dx, ..self };
+    }
+
+    func shift(mut self, dx: int, dy: int) -> void {
+        self.x += dx;
+        self.y += dy;
+    }
+}
+
+struct Vec2 {
+    x: float,
+    y: float,
+}
+
+operator (l: Vec2) + (r: Vec2) -> Vec2 => Vec2 { x: l.x + r.x, y: l.y + r.y };
+operator (l: Vec2) * (k: float) -> Vec2 => Vec2 { x: l.x * k, y: l.y * k };
+operator (v: Vec2) [] (i: int) -> float => i == 0 ? v.x : v.y;
+
+enum Status {
+    Ok,
+    Error(string),
+    Pending(int),
+    Moved { x: int, y: int },
+}
+
+impl Status {
+    func is_done(self) -> bool {
+        return match self {
+            Status::Ok => true,
+            _ => false,
+        };
+    }
+}
+
+trait Shape {
+    func area(self) -> float;
+
+    func describe(self) -> string => f"area = {self.area():.2}";
+}
+
+struct Circle {
+    r: float,
+}
+
+struct Rect {
+    w: float,
+    h: float,
+}
+
+impl Shape for Circle {
+    func area(self) -> float {
+        return m::PI * self.r ** 2;
+    }
+}
+
+impl Shape for Rect {
+    func area(self) -> float => self.w * self.h;
+}
+
+struct Stack<T> {
+    items: T[],
+}
+
+impl<T> Stack<T> {
+    func new() -> Self => Stack { items: [] };
+
+    func push(mut self, item: T) -> void {
+        self.items.append(item);
+    }
+
+    func pop(mut self) -> T? {
+        return self.items.pop();
+    }
+}
+
+struct Ring<T, const N: int> {
+    data: T[N],
+    head: int,
+}
+
+func max<T>(a: T, b: T) -> T where T: Ord {
+    return a > b ? a : b;
+}
+
+func largest<T>(items: T[]) -> T? where T: Ord + Copy {
+    guard (items.len() > 0) else {
+        return null;
+    }
+    var best = items[0];
+    for item in items[1..] {
+        best = max(best, item);
+    }
+    return best;
+}
+
+func add(num1: int, num2: int) -> int {
+    return num1 + num2;
+}
+
+func greet(name: string = "world") -> void {
+    println("hello, " + name);
+}
+
+func sum(nums: int...) -> int {
+    var total = 0;
+    for n in nums {
+        total += n;
+    }
+    return total;
+}
+
+func square(x: int) -> int => x * x;
+
+@inline
+func clamp(v: int, lo: int, hi: int) -> int => v < lo ? lo : v > hi ? hi : v;
+
+@deprecated("use add instead")
+func plus(a: int, b: int) -> int => a + b;
+
+func divide(a: int, b: int) -> Result<int, string> {
+    if (b == 0) {
+        return Err("divide by zero");
+    }
+    return Ok(a / b);
+}
+
+func safeDivide(a: int, b: int) -> Result<int, string> {
+    let value = divide(a, b)?;
+    return Ok(value);
+}
+
+func parsePositive(text: string) -> Result<int, string> {
+    let n = parse_int(text) orelse return Err("not a number");
+    guard (n > 0) else {
+        return Err("must be positive");
+    }
+    return Ok(n);
+}
+
+func makeAdder(base: int) -> Callback {
+    let adder = (n: int) -> int => n + base;
+    return adder;
+}
+
+func makeCounter() -> func() -> int {
+    var n = 0;
+    return move () -> int {
+        n += 1;
+        return n;
+    };
+}
+
+func readConfig(path: string) -> Result<string, string> {
+    with (let file = fs::open(path)?) {
+        return file.read_all();
+    }
+}
+
+func copyBuffer(size: int) -> void {
+    let buf = alloc<char>(size);
+    defer free(buf);
+
+    let log = fs::open("log.txt")!;
+    defer log.close();
+
+    println("working");
+}
+
+async func fetch(url: string) -> Result<string, string> {
+    let body = await http::get(url)?;
+    return Ok(body);
+}
+
+func rawAccess(ptr: int*, n: int) -> int {
+    var total = 0;
+    unsafe {
+        for i in 0..n {
+            total += *(ptr + i);
+        }
+    }
+    return total;
+}
+
+test "add works" {
+    assert(add(2, 3) == 5);
+    assert(add(-1, 1) == 0, "should cancel out");
+}
+
+test "divide by zero fails" {
+    assert(divide(1, 0).is_err());
+}
+
+func main(argc: int, argv: char*) -> int {
+    let result = add(10, 20);
+    var res = add(10, 20);
+    res = 100;
+
+    println(res);
+    ag::io::println(res);
+    println(result);
+    ag::io::println(result);
+
+    let arr: int[5] = [1, 2, 3, 4, 5];
+    let slice = arr[1..3];
+    let head = arr[..2];
+    let tail = arr[2..];
+    let pair: (int, string) = (1, "one");
+    let (a, b) = pair;
+
+    let name = "ag";
+    println(f"hello, {name}!");
+    println(f"{res:>6} | {res:#x} | {3.14159:.2}");
+    println(r"raw \n string, no escapes");
+    println("""
+        multi-line
+        string
+    """);
+    let letter = 'a';
+    let tab = '\t';
+
+    if (res > 50) {
+        println("big");
+    } else if (res == 50) {
+        println("equal");
+    } else {
+        println("small");
+    }
+
+    while (res < 105) {
+        res += 1;
+    }
+
+    until (res >= 110) {
+        res += 1;
+    }
+
+    for i in 0..10 {
+        println(i);
+    }
+    for i in 0..=10 {
+        println(i);
+    }
+    for i in 0..100 by 5 {
+        println(i);
+    }
+    for item in arr {
+        println(item);
+    }
+    for i, item in arr {
+        println(f"{i}: {item}");
+    }
+
+    var count = 0;
+    loop {
+        count += 1;
+        if (count >= 3) {
+            break;
+        }
+    }
+
+    let found = loop {
+        count += 1;
+        if (count % 7 == 0) {
+            break count;
+        }
+    };
+
+    outer: for i in 0..10 {
+        for j in 0..10 {
+            if (i * j == 42) {
+                break outer;
+            }
+            if (j > i) {
+                continue outer;
+            }
+        }
+    }
+
+    let status = Status::Error("failed");
+    match status {
+        Status::Ok => println("ok"),
+        Status::Error(msg) => println(msg),
+        Status::Pending(code) if code > 5 => println("slow"),
+        Status::Pending(code) => println(code),
+        Status::Moved { x, y } => println(f"{x},{y}"),
+    }
+
+    let grade = match res {
+        0 => "zero",
+        1..=9 => "small",
+        n @ 10..=99 if n % 2 == 0 => "even tens",
+        10..=99 => "odd tens",
+        100 | 200 | 300 => "round",
+        _ => "huge",
+    };
+    println(grade);
+
+    if let Status::Error(msg) = status {
+        println(msg);
+    }
+
+    var st = Stack<int>::new();
+    st.push(1);
+    st.push(2);
+    while let Some(top) = st.pop() {
+        println(top);
+    }
+
+    let p = Point { x: 3, y: 4 };
+    let Point { x, y } = p;
+    let q = p.moved(1, 1);
+    println(p.dist());
+
+    let c = Circle { r: 2.0 };
+    println(c.area());
+    println(c.describe());
+
+    let shapes: Box<Shape>[] = [box Circle { r: 1.0 }, box Rect { w: 2.0, h: 3.0 }];
+    for s in shapes {
+        println(s.describe());
+    }
+
+    let v1 = Vec2 { x: 1.0, y: 2.0 };
+    let v2 = v1 + v1 * 2.0;
+    println(v2[0]);
+
+    let bigger = max<int>(10, 20);
+    println(bigger);
+
+    var n = 5;
+    let r: &int = &n;
+    let w: &mut int = &mut n;
+    let v = *r;
+    println(v);
+
+    let addFive = makeAdder(5);
+    println(addFive(10));
+
+    let tick = makeCounter();
+    tick();
+    tick();
+
+    let nums = [1, 2, 3, 4, 5, 6];
+    let total = nums
+        |> filter((n) => n % 2 == 0)
+        |> map((n) => n * n)
+        |> sum_all();
+    println(total);
+
+    let maybe: int? = null;
+    let safe = maybe ?? 0;
+    let user: User? = find_user(1);
+    let city = user?.address?.city ?? "unknown";
+    maybe ??= 42;
+
+    let big = 300 as byte;
+    let ratio = 7 as float / 2.0;
+    let size = sizeof<Point>();
+
+    let flags = FLAGS & MASK | 1 << 3;
+    let inv = ~flags ^ 0xF;
+    flags <<= 2;
+    flags |= 1;
+
+    if (3 in 1..10 && "ag" in ["ag", "c"]) {
+        println("found");
+    }
+
+    let scores = map { "ann": 90, "bob": 75 };
+    for (k, val) in scores {
+        println(f"{k} -> {val}");
+    }
+
+    let jobs = Channel<int>::new(8);
+    spawn {
+        for i in 0..5 {
+            jobs <- i;
+        }
+        jobs.close();
+    }
+    while let Some(job) = <-jobs {
+        println(job);
+    }
+
+    let page = await fetch("http://example.com");
+    match page {
+        Ok(body) => println(body),
+        Err(e) => eprintln(e),
+    }
+
+    let lock = Mutex<int>::new(0);
+    lock.with((mut v) => {
+        v += 1;
+    });
+
+    greet();
+    greet(name: "ag");
+    println(sum(1, 2, 3));
+    println(sum(...nums));
+
+    return 0;
+}

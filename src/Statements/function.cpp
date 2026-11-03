@@ -25,15 +25,47 @@ parse_function_parameter(Parser& parser) {
   while (parser.is_valid()) {
 
     param.location = {parser.current_token().line, parser.current_token().column};
-    AG_EXPECT_GET_ID_OR_RETURN(
-        parser, ag::error::ExpectedFunctionName, param.name, std::nullopt, TokenName::AG_IDENTIFIER);
 
-    AG_EXPECT_OR_RETURN(parser, TokenName::AG_COLON, ag::error::ExpectedColon, std::nullopt);
+    const bool is_mut = parser.match(TokenName::AG_MUT);
 
-    auto type = parse_type(parser);
-    if (!type)
-      return std::nullopt;
-    param.type = std::move(*type);
+    // Methods may write `self` without an explicit type.  The enclosing
+    // `impl` block supplies the struct type.
+    if (parser.check(TokenName::AG_IDENTIFIER) && parser.current_token().value == "self") {
+      if (parser.current_impl_type().empty()) {
+        print_error(ag::error::ExpectedParameterName, parser, param.location);
+        return std::nullopt;
+      }
+      if (!l_parameters.empty()) {
+        print_error(ag::error::InvalidArgumentCount, parser, param.location);
+        return std::nullopt;
+      }
+
+      param.name = "self";
+      param.type = make_struct_type(parser.current_impl_type());
+      param.type.is_const = !is_mut;
+      parser.advance();
+    } else {
+      if (is_mut) {
+        print_error(ag::error::ExpectedParameterName, parser, param.location);
+        return std::nullopt;
+      }
+
+      AG_EXPECT_GET_ID_OR_RETURN(
+          parser, ag::error::ExpectedFunctionName, param.name, std::nullopt, TokenName::AG_IDENTIFIER);
+
+      AG_EXPECT_OR_RETURN(parser, TokenName::AG_COLON, ag::error::ExpectedColon, std::nullopt);
+
+      auto type = parse_type(parser);
+      if (!type)
+        return std::nullopt;
+
+      if (type->primitive_type == PrimitiveType::USER_DEFINED && type->type_name == "Self" &&
+          !parser.current_impl_type().empty()) {
+        *type = make_struct_type(parser.current_impl_type());
+      }
+
+      param.type = std::move(*type);
+    }
 
     l_parameters.push_back(param);
     if (!parser.match(TokenName::AG_COMMA))
@@ -53,7 +85,17 @@ parse_parameter_group(Parser& parser) {
 
 static std::optional<DataType>
 parse_return_type(Parser& parser) {
-  return parse_type(parser);
+  auto type = parse_type(parser);
+  if (!type)
+    return std::nullopt;
+
+  // `Self` inside an impl block is the enclosing struct type.
+  if (type->primitive_type == PrimitiveType::USER_DEFINED && type->type_name == "Self" &&
+      !parser.current_impl_type().empty()) {
+    *type = make_struct_type(parser.current_impl_type());
+  }
+
+  return type;
 }
 
 static std::string
@@ -129,12 +171,20 @@ mangle_operator_symbol(const std::string_view symbol) {
 
 std::string
 FunctionStatement::function_label() const {
-  if (!m_is_operator)
-    return generate_function_label(m_function_name, m_parameters);
+  std::string label;
+  if (!m_is_operator) {
+    label = generate_function_label(m_function_name, m_parameters);
+  } else {
+    const std::string_view symbol =
+        m_function_name.size() > 8 ? std::string_view(m_function_name).substr(8) : std::string_view{};
+    label = generate_function_label("__agop_" + mangle_operator_symbol(symbol), m_parameters);
+  }
 
-  const std::string_view symbol =
-      m_function_name.size() > 8 ? std::string_view(m_function_name).substr(8) : std::string_view{};
-  return generate_function_label("__agop_" + mangle_operator_symbol(symbol), m_parameters);
+  // Methods live in the struct's namespace so two types may define methods
+  // with the same source name and signature.
+  if (!m_owner_type.empty())
+    label = m_owner_type + "$" + label;
+  return label;
 }
 
 AG_scope<Statements>
@@ -144,6 +194,8 @@ FunctionStatement::ParseFunction(Parser& parser) {
   auto        function_stmt = AG_cscope<FunctionStatement>();
   TokenName   temp_token;
   const Token function_token = parser.current_token();
+
+  function_stmt->m_owner_type = parser.current_impl_type();
 
   AG_EXPECT_GET_ID_OR_RETURN(
       parser, ag::error::ExpectedFunctionName, function_stmt->m_function_name, nullptr, TokenName::AG_IDENTIFIER);
@@ -292,7 +344,7 @@ FunctionStatement::ParseOperator(Parser& parser) {
 bool
 FunctionStatement::register_function(Parser& parser) {
   FunctionEntry entry;
-  entry.name        = m_function_name;
+  entry.name        = m_owner_type.empty() ? m_function_name : m_owner_type + "." + m_function_name;
   entry.label       = function_label();
   entry.return_type = std::make_shared<DataType>(m_return_type);
   entry.parameters  = m_parameters;

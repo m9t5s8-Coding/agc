@@ -23,11 +23,13 @@ print_usage(std::ostream& output) {
   output << "Usage: agc <file> [options]\n"
             "\n"
             "Options:\n"
-            "  -o <path>       Build an executable at <path>\n"
-            "  -ir [path]      Write textual IR (stdout when path is omitted)\n"
-            "  -asm [path]     Write assembly (stdout when path is omitted)\n"
-            "  -json [path]    Write JSON result (stdout when path is omitted)\n"
-            "  -h, --help      Show this help\n"
+            "  -o <path>        Build an executable at <path>\n"
+            "  --llvm           Use the LLVM backend for -o instead of NASM\n"
+            "  --llvm-ir [path] Write textual LLVM IR (stdout when path is omitted)\n"
+            "  -ir [path]       Write textual AGC IR (stdout when path is omitted)\n"
+            "  -asm [path]      Write NASM assembly (stdout when path is omitted)\n"
+            "  -json [path]     Write JSON result (stdout when path is omitted)\n"
+            "  -h, --help       Show this help\n"
             "\n"
             "Legacy forms:\n"
             "  agc <file> -o text <path>   Write assembly text\n"
@@ -35,6 +37,8 @@ print_usage(std::ostream& output) {
             "\n"
             "Examples:\n"
             "  agc main.ag -o test\n"
+            "  agc main.ag --llvm -o test-llvm\n"
+            "  agc main.ag --llvm-ir test.ll\n"
             "  agc main.ag -ir test.ir\n"
             "  agc main.ag -asm test.asm\n"
             "  agc main.ag -json test.json\n";
@@ -150,6 +154,52 @@ build_executable(const std::string& assembly,
   return true;
 }
 
+bool
+build_executable_llvm(const std::string& llvm_ir,
+                      const std::string& output_path) {
+  namespace fs = std::filesystem;
+
+  std::error_code error;
+  const auto      temp_directory = fs::temp_directory_path(error);
+  if (error) {
+    std::cerr << "Error: cannot find a temporary directory: " << error.message() << '\n';
+    return false;
+  }
+
+  const auto llvm_path = temp_directory / ("agc-" + std::to_string(::getpid()) + ".ll");
+
+  {
+    std::ofstream llvm_file(llvm_path, std::ios::binary);
+    if (!llvm_file.is_open()) {
+      std::cerr << "Error: cannot create temporary LLVM file '" << llvm_path.string() << "'\n";
+      return false;
+    }
+    llvm_file << llvm_ir;
+    if (!llvm_file) {
+      std::cerr << "Error: failed to write temporary LLVM file '" << llvm_path.string() << "'\n";
+      fs::remove(llvm_path, error);
+      return false;
+    }
+  }
+
+  // clang accepts textual LLVM IR and links it against the C runtime, which
+  // is where the LLVM backend's __ag_* helpers get calloc/write/read/exit.
+  const std::string compile_command = "clang -x ir -O0 -o " + shell_quote(output_path)
+                                      + " " + shell_quote(llvm_path.string());
+
+  const bool compiled = std::system(compile_command.c_str()) == 0;
+
+  fs::remove(llvm_path, error);
+
+  if (!compiled) {
+    std::cerr << "Error: failed to build LLVM executable '" << output_path
+              << "' (is clang installed?)\n";
+    return false;
+  }
+
+  return true;
+}
+
 } // namespace
 
 int
@@ -176,6 +226,8 @@ main(int   argc,
   EmitTarget  ir_target;
   EmitTarget  assembly_target;
   EmitTarget  json_target;
+  EmitTarget  llvm_ir_target;
+  bool        llvm_backend = false;
   std::string executable_path;
 
   ag::OutputFormat legacy_format = ag::OutputFormat::NONE;
@@ -198,6 +250,11 @@ main(int   argc,
           return EXIT_FAILURE;
         }
         executable_path = argv[index++];
+      } else if (argument == "--llvm" || argument == "-llvm") {
+        llvm_backend = true;
+      } else if (argument == "--llvm-ir" || argument == "-llvm-ir" ||
+                 argument == "--emit-llvm") {
+        llvm_ir_target = parse_emit_target(index, argc, argv);
       } else if (argument == "-ir" || argument == "--ir" || argument == "--emit-ir") {
         ir_target = parse_emit_target(index, argc, argv);
       } else if (argument == "-asm" || argument == "--asm" || argument == "--emit-asm") {
@@ -216,7 +273,7 @@ main(int   argc,
   }
 
   if (!legacy_mode && !ir_target.enabled && !assembly_target.enabled && !json_target.enabled
-      && executable_path.empty()) {
+      && !llvm_ir_target.enabled && executable_path.empty()) {
     print_usage(std::cerr);
     return EXIT_FAILURE;
   }
@@ -243,6 +300,7 @@ main(int   argc,
 
   parser.set_output_format(legacy_format);
   parser.set_output_file(legacy_output_file);
+  parser.set_emit_llvm(llvm_backend || llvm_ir_target.enabled);
   parser.set_lexer(lexer);
   parser.parse();
 
@@ -258,6 +316,9 @@ main(int   argc,
   if (json_target.enabled)
     success = write_text(json_target, parser.to_json()) && success;
 
+  if (llvm_ir_target.enabled)
+    success = write_text(llvm_ir_target, parser.get_llvm_ir()) && success;
+
   if (ir_target.enabled)
     success = write_text(ir_target, parser.get_ir()) && success;
 
@@ -265,10 +326,14 @@ main(int   argc,
     success = write_text(assembly_target, parser.get_assembly()) && success;
 
   if (!executable_path.empty()) {
-    if (parser.is_syntax_valid())
-      success = build_executable(parser.get_assembly(), executable_path) && success;
-    else
+    if (parser.is_syntax_valid()) {
+      if (llvm_backend)
+        success = build_executable_llvm(parser.get_llvm_ir(), executable_path) && success;
+      else
+        success = build_executable(parser.get_assembly(), executable_path) && success;
+    } else {
       success = false;
+    }
   }
 
   return success && parser.is_syntax_valid() ? EXIT_SUCCESS : EXIT_FAILURE;

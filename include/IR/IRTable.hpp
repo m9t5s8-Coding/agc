@@ -38,6 +38,17 @@ struct FunctionData {
   std::vector<std::shared_ptr<VariableData>> variables;
 };
 
+// A module-level variable.  Globals are represented as 8-byte slots by both
+// backends, so all primitive values (including pointers and small chars) can
+// share the same load/store lowering.
+struct GlobalVariableData {
+  std::string name;         // unique IR/assembly label, e.g. "g.0.counter"
+  std::string source_name;  // original source name, e.g. "counter"
+  uint32_t    size{};       // reserved size in bytes
+  bool        is_const = false;
+  std::string initializer;  // literal value or data label, e.g. "0" / "str.3"
+};
+
 class IRTable {
 public:
   // Every slot starts at an 8 byte boundary, which is enough for all
@@ -157,6 +168,53 @@ public:
     return allocate(*function, name, name, size, false, 0);
   }
 
+  // Find a module-level variable by its source name.
+  std::shared_ptr<GlobalVariableData>
+  lookup_global_source(std::string_view source_name) {
+    auto it = std::find_if(m_globals.begin(), m_globals.end(), [source_name](const auto& global) {
+      return global->source_name == source_name;
+    });
+    return it == m_globals.end() ? nullptr : *it;
+  }
+
+  // Find a module-level variable by its IR/assembly name.
+  std::shared_ptr<GlobalVariableData>
+  lookup_global_data(std::string_view name) {
+    auto it = std::find_if(m_globals.begin(), m_globals.end(), [name](const auto& global) {
+      return global->name == name;
+    });
+    return it == m_globals.end() ? nullptr : *it;
+  }
+
+  std::shared_ptr<GlobalVariableData>
+  declare_global(std::string source_name,
+                 uint32_t    size,
+                 bool        is_const,
+                 std::string initializer) {
+    if (source_name.empty())
+      return nullptr;
+
+    if (auto existing = lookup_global_source(source_name))
+      return existing;
+
+    if (size < kSlotAlignment)
+      size = kSlotAlignment;
+
+    auto global           = std::make_shared<GlobalVariableData>();
+    global->name          = "g." + std::to_string(m_globals.size()) + "." + source_name;
+    global->source_name   = std::move(source_name);
+    global->size          = size;
+    global->is_const      = is_const;
+    global->initializer   = std::move(initializer);
+    m_globals.push_back(global);
+    return global;
+  }
+
+  const std::vector<std::shared_ptr<GlobalVariableData>>&
+  globals() const {
+    return m_globals;
+  }
+
   bool
   insert_data(int                            index,
               std::shared_ptr<VariableData>& data) {
@@ -184,6 +242,7 @@ public:
   void
   reset() {
     m_IRTable.clear();
+    m_globals.clear();
   }
 
   size_t
@@ -226,6 +285,7 @@ private:
   }
 
   std::vector<FunctionData> m_IRTable;
+  std::vector<std::shared_ptr<GlobalVariableData>> m_globals;
 };
 
 [[nodiscard]]

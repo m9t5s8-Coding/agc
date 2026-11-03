@@ -14,6 +14,11 @@ public:
   virtual void
   generate_code(CodeGenContext&) = 0;
 
+  int
+  function_index() const {
+    return m_function_index;
+  }
+
 protected:
   int m_function_index{-1};
 };

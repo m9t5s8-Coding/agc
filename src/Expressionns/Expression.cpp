@@ -5,6 +5,8 @@
 #include "IR/FunctionCall.hpp"
 #include "IR/IRTable.hpp"
 #include "IR/IndexAssign.hpp"
+#include "IR/MemberLoad.hpp"
+#include "IR/MemberStore.hpp"
 #include "IR/Param.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
@@ -12,11 +14,13 @@
 #include "SymbolTable.hpp"
 #include "Token.hpp"
 #include "error_msg.hpp"
+#include "macro.hpp"
 #include <algorithm>
 #include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace ag {
@@ -100,8 +104,47 @@ get_binary_operator(TokenName token) {
     return BIN_OPERATOR::DIVISION;
   case TokenName::AG_MODULO:
     return BIN_OPERATOR::MODULUS;
+  case TokenName::AG_ADDITION_ASSIGNMENT:
+    return BIN_OPERATOR::ADDITION;
+  case TokenName::AG_SUBTRACTION_ASSIGNMENT:
+    return BIN_OPERATOR::SUBTRACTION;
+  case TokenName::AG_MULTIPLY_ASSIGNMENT:
+    return BIN_OPERATOR::MULTIPLICATION;
+  case TokenName::AG_DIVISION_ASSIGNMENT:
+    return BIN_OPERATOR::DIVISION;
+  case TokenName::AG_MODULO_ASSIGNMENT:
+    return BIN_OPERATOR::MODULUS;
+  case TokenName::AG_BITWISE_AND_ASSIGNMENT:
+    return BIN_OPERATOR::BITWISE_AND;
+  case TokenName::AG_BITWISE_OR_ASSIGNMENT:
+    return BIN_OPERATOR::BITWISE_OR;
+  case TokenName::AG_BITWISE_XOR_ASSIGNMENT:
+    return BIN_OPERATOR::BITWISE_XOR;
+  case TokenName::AG_LEFT_SHIFT_ASSIGNMENT:
+    return BIN_OPERATOR::LEFT_SHIFT;
+  case TokenName::AG_RIGHT_SHIFT_ASSIGNMENT:
+    return BIN_OPERATOR::RIGHT_SHIFT;
   default:
     return BIN_OPERATOR::NONE;
+  }
+}
+
+static bool
+is_compound_assignment_token(TokenName token) {
+  switch (token) {
+  case TokenName::AG_ADDITION_ASSIGNMENT:
+  case TokenName::AG_SUBTRACTION_ASSIGNMENT:
+  case TokenName::AG_MULTIPLY_ASSIGNMENT:
+  case TokenName::AG_DIVISION_ASSIGNMENT:
+  case TokenName::AG_MODULO_ASSIGNMENT:
+  case TokenName::AG_BITWISE_AND_ASSIGNMENT:
+  case TokenName::AG_BITWISE_OR_ASSIGNMENT:
+  case TokenName::AG_BITWISE_XOR_ASSIGNMENT:
+  case TokenName::AG_LEFT_SHIFT_ASSIGNMENT:
+  case TokenName::AG_RIGHT_SHIFT_ASSIGNMENT:
+    return true;
+  default:
+    return false;
   }
 }
 
@@ -251,6 +294,28 @@ is_identifier_expression(const Expression* expression) {
   return primary && primary->primary_type == PrimitiveType::IDENTIFIER;
 }
 
+MemberExpression*
+as_member_target(Expression* expression) {
+  return dynamic_cast<MemberExpression*>(expression);
+}
+
+// Struct values are pointer-sized addresses.  Pointer-to-struct types are
+// accepted too so `p.x` and `p->x` behave the same.
+DataType
+unwrap_struct_type(DataType type) {
+  if (type.kind == TypeKind::POINTER && type.pointee)
+    return *type.pointee;
+  return type;
+}
+
+Expression*
+root_assignment_target(Expression* expression) {
+  Expression* current = expression;
+  while (auto* member = dynamic_cast<MemberExpression*>(current))
+    current = member->object.get();
+  return current;
+}
+
 BinaryExpression*
 as_string_index_target(Expression* expression) {
   auto* index = dynamic_cast<BinaryExpression*>(expression);
@@ -282,6 +347,10 @@ check_assignment_target_is_mutable(Expression*           target,
   // variable, so a `let` binding must reject it just like direct assignment.
   if (auto* index = as_string_index_target(target))
     target = index->left.get();
+
+  // Field writes mutate the object reached through the base binding.
+  if (as_member_target(target))
+    target = root_assignment_target(target);
 
   auto* identifier = dynamic_cast<PrimaryExpression*>(target);
   if (!identifier || identifier->primary_type != PrimitiveType::IDENTIFIER)
@@ -355,6 +424,11 @@ static const std::initializer_list<TokenName> binary_list = {
     TokenName::AG_LESS,        TokenName::AG_GREATER,     TokenName::AG_LESS_EQUAL,  TokenName::AG_GREATER_EQUAL,
     TokenName::AG_LEFT_SHIFT,  TokenName::AG_RIGHT_SHIFT, TokenName::AG_PLUS,        TokenName::AG_MINUS,
     TokenName::AG_ASTERISK,    TokenName::AG_SLASH,       TokenName::AG_MODULO,
+    TokenName::AG_ADDITION_ASSIGNMENT,    TokenName::AG_SUBTRACTION_ASSIGNMENT,
+    TokenName::AG_MULTIPLY_ASSIGNMENT,    TokenName::AG_DIVISION_ASSIGNMENT,
+    TokenName::AG_MODULO_ASSIGNMENT,      TokenName::AG_BITWISE_AND_ASSIGNMENT,
+    TokenName::AG_BITWISE_OR_ASSIGNMENT,  TokenName::AG_BITWISE_XOR_ASSIGNMENT,
+    TokenName::AG_LEFT_SHIFT_ASSIGNMENT,  TokenName::AG_RIGHT_SHIFT_ASSIGNMENT,
 };
 
 static bool
@@ -435,8 +509,10 @@ Expression::parse_pratt(Parser& parser,
     if (!parser.check_one_of(binary_list, &temp_token)) {
       break;
     }
-    BIN_OPERATOR bin_op = get_binary_operator(temp_token);
-    auto [l_bp, r_bp]   = get_binding_power(bin_op);
+    const bool   compound = is_compound_assignment_token(temp_token);
+    BIN_OPERATOR bin_op   = get_binary_operator(temp_token);
+    auto [l_bp, r_bp]     = compound ? std::tuple<float, float>{1.1f, 1.0f}
+                                     : get_binding_power(bin_op);
     if (l_bp < min_bp) {
       break;
     }
@@ -447,6 +523,7 @@ Expression::parse_pratt(Parser& parser,
       return nullptr;
     }
     auto binary = AG_cscope<BinaryExpression>(bin_op, std::move(left), std::move(right));
+    binary->is_compound_assignment = compound;
     binary->location = {operator_token.line, operator_token.column};
     left             = std::move(binary);
   }
@@ -489,6 +566,16 @@ PrimaryExpression::parse_primary(Parser& parser) {
     primary_exp->value        = parser.current_token().value;
   }
   parser.advance();
+
+  // `Point { x: 3, y: 4 }` is a struct literal.  The identifier has already
+  // been consumed, so the literal parser starts at the opening brace.
+  if (primary_exp->primary_type == PrimitiveType::IDENTIFIER &&
+      parser.check(TokenName::AG_LEFT_BRACE)) {
+    return StructLiteralExpression::parse(parser,
+                                          std::string(primary_exp->value),
+                                          primary_exp->location);
+  }
+
   return primary_exp;
 }
 
@@ -540,7 +627,188 @@ UniaryExpression::get_data_type() {
 
 PrimitiveType
 MemberExpression::get_type() {
-  return PrimitiveType::VOID;
+  return get_data_type().primitive_type;
+}
+
+DataType
+MemberExpression::get_data_type() {
+  if (member_found)
+    return member_type;
+
+  if (object) {
+    auto object_type = unwrap_struct_type(object->get_data_type());
+    if (object_type.kind == TypeKind::STRUCT) {
+      if (const auto* definition = get_struct_table().lookup(object_type.type_name)) {
+        if (const auto* member = definition->find_member(field_name))
+          return member->type;
+      }
+    }
+  }
+
+  DataType unknown;
+  unknown.primitive_type = PrimitiveType::UNEXPECTED;
+  return unknown;
+}
+
+bool
+MemberExpression::analyze_semantics(Parser&               parser,
+                                    const SourceLocation& location) {
+  const auto& diagnostic_location = this->source_location(location);
+
+  if (!object)
+    return false;
+  if (!object->analyze_semantics(parser, object->source_location(diagnostic_location)))
+    return false;
+
+  auto object_type = unwrap_struct_type(object->get_data_type());
+  if (object_type.primitive_type == PrimitiveType::UNEXPECTED)
+    return false;
+
+  if (object_type.kind != TypeKind::STRUCT) {
+    print_error(error::InvalidOperandTypes, parser, diagnostic_location);
+    return false;
+  }
+
+  const auto* definition = get_struct_table().lookup(object_type.type_name);
+  if (!definition) {
+    print_error(error::UndefinedType, parser, diagnostic_location);
+    return false;
+  }
+
+  const auto* member = definition->find_member(field_name);
+  if (!member) {
+    print_error(error::UndefinedMember, parser, diagnostic_location);
+    return false;
+  }
+
+  member_type  = member->type;
+  byte_offset  = member->byte_offset;
+  member_found = true;
+  return true;
+}
+
+std::string
+MemberExpression::generate_ir(LabelCounters& counter,
+                              Parser&        parser) {
+  if (!member_found || !object)
+    return "";
+
+  const auto object_value = object->generate_ir(counter, parser);
+  const auto result       = make_temp(counter, parser);
+  parser.add_instructios(
+      AG_cscope<MemberLoad>(result, object_value, static_cast<uint32_t>(byte_offset), counter.function_index));
+  return result;
+}
+
+PrimitiveType
+StructLiteralExpression::get_type() {
+  return result_type.primitive_type;
+}
+
+DataType
+StructLiteralExpression::get_data_type() {
+  return result_type;
+}
+
+bool
+StructLiteralExpression::analyze_semantics(Parser&               parser,
+                                           const SourceLocation& location) {
+  const auto& diagnostic_location = this->source_location(location);
+
+  const auto* definition = get_struct_table().lookup(type_name);
+  if (!definition) {
+    print_error(error::UndefinedType, parser, diagnostic_location);
+    return false;
+  }
+
+  result_type = make_struct_type(type_name);
+
+  if (spread) {
+    if (!spread->analyze_semantics(parser, spread->source_location(diagnostic_location)))
+      return false;
+
+    const auto spread_type = unwrap_struct_type(spread->get_data_type());
+    if (spread_type.kind != TypeKind::STRUCT || spread_type.type_name != type_name) {
+      print_error(error::IncompatibleTypes, parser, spread->source_location(diagnostic_location));
+      return false;
+    }
+  }
+
+  std::unordered_set<std::string> initialized_fields;
+
+  for (const auto& initializer : fields) {
+    const auto* member = definition->find_member(initializer.name);
+    if (!member) {
+      print_error(error::UndefinedMember, parser, initializer.location);
+      return false;
+    }
+
+    if (!initialized_fields.insert(initializer.name).second) {
+      print_error(error::DuplicateFieldName, parser, initializer.location);
+      return false;
+    }
+
+    if (!initializer.value ||
+        !initializer.value->analyze_semantics(
+            parser, initializer.value->source_location(initializer.location)))
+      return false;
+
+    if (!is_compatible_type(member->type, initializer.value->get_data_type())) {
+      print_error(error::IncompatibleTypes,
+                  parser,
+                  initializer.value->source_location(initializer.location));
+      return false;
+    }
+  }
+
+  return true;
+}
+
+std::string
+StructLiteralExpression::generate_ir(LabelCounters& counter,
+                                     Parser&        parser) {
+  const auto* definition = get_struct_table().lookup(type_name);
+  if (!definition)
+    return "0";
+
+  parser.add_instructios(AG_cscope<Param>(std::to_string(definition->size_in_bytes),
+                                          counter.function_index));
+  const auto result = make_temp(counter, parser);
+  parser.add_instructios(AG_cscope<FunctionCall>("__ag_alloc", counter.function_index, result));
+
+  std::unordered_set<std::string> initialized_fields;
+  for (const auto& initializer : fields)
+    initialized_fields.insert(initializer.name);
+
+  if (spread) {
+    const auto spread_value = spread->generate_ir(counter, parser);
+    for (const auto& member : definition->members) {
+      if (initialized_fields.contains(member.name))
+        continue;
+
+      const auto field_value = make_temp(counter, parser);
+      parser.add_instructios(AG_cscope<MemberLoad>(
+          field_value, spread_value, static_cast<uint32_t>(member.byte_offset), counter.function_index));
+      parser.add_instructios(AG_cscope<MemberStore>(result,
+                                                    static_cast<uint32_t>(member.byte_offset),
+                                                    field_value,
+                                                    counter.function_index));
+    }
+  }
+
+  for (const auto& initializer : fields) {
+    const auto* member = definition->find_member(initializer.name);
+    if (!member)
+      continue;
+
+    const auto value = initializer.value->generate_ir(counter, parser);
+    parser.add_instructios(AG_cscope<MemberStore>(result,
+                                                  static_cast<uint32_t>(member->byte_offset),
+                                                  value,
+                                                  counter.function_index));
+  }
+
+  return result;
 }
 
 PrimitiveType
@@ -563,24 +831,58 @@ CallExpression::analyze_semantics(Parser&               parser,
                                   const SourceLocation& location) {
   const auto& diagnostic_location = this->source_location(location);
 
-  auto* function_name = dynamic_cast<PrimaryExpression*>(callee.get());
-  if (!function_name || function_name->primary_type != PrimitiveType::IDENTIFIER) {
-    print_error(error::ExpectedFunctionName, parser, diagnostic_location);
-    return false;
-  }
+  m_is_method = false;
+  std::vector<FunctionEntry> candidates;
+  std::optional<DataType>    receiver_argument_type;
 
-  auto candidates = get_function_table().lookup_all(function_name->get_value());
-  if (candidates.empty()) {
-    if (auto builtin = make_builtin_entry(function_name->get_value()))
-      candidates.push_back(std::move(*builtin));
-    else {
+  if (auto* member_callee = dynamic_cast<MemberExpression*>(callee.get())) {
+    // `value.method(...)` resolves against methods registered for the
+    // receiver's struct type.  The receiver is passed as the implicit first
+    // argument.
+    if (!member_callee->object ||
+        !member_callee->object->analyze_semantics(
+            parser, member_callee->object->source_location(diagnostic_location)))
+      return false;
+
+    const auto receiver_type = unwrap_struct_type(member_callee->object->get_data_type());
+    if (receiver_type.primitive_type == PrimitiveType::UNEXPECTED)
+      return false;
+    if (receiver_type.kind != TypeKind::STRUCT) {
+      print_error(error::InvalidOperandTypes, parser, diagnostic_location);
+      return false;
+    }
+
+    candidates = get_function_table().lookup_all(
+        std::string(receiver_type.type_name) + "." + member_callee->field_name);
+    if (candidates.empty()) {
       print_error(error::UndefinedFunction, parser, diagnostic_location);
       return false;
+    }
+
+    m_is_method            = true;
+    receiver_argument_type = receiver_type;
+  } else {
+    auto* function_name = dynamic_cast<PrimaryExpression*>(callee.get());
+    if (!function_name || function_name->primary_type != PrimitiveType::IDENTIFIER) {
+      print_error(error::ExpectedFunctionName, parser, diagnostic_location);
+      return false;
+    }
+
+    candidates = get_function_table().lookup_all(function_name->get_value());
+    if (candidates.empty()) {
+      if (auto builtin = make_builtin_entry(function_name->get_value()))
+        candidates.push_back(std::move(*builtin));
+      else {
+        print_error(error::UndefinedFunction, parser, diagnostic_location);
+        return false;
+      }
     }
   }
 
   std::vector<DataType> argument_types;
-  argument_types.reserve(arguments.size());
+  argument_types.reserve(arguments.size() + (m_is_method ? 1 : 0));
+  if (m_is_method && receiver_argument_type)
+    argument_types.push_back(*receiver_argument_type);
   for (const auto& argument : arguments) {
     if (!argument->analyze_semantics(parser, argument->source_location(diagnostic_location)))
       return false;
@@ -598,12 +900,12 @@ CallExpression::analyze_semantics(Parser&               parser,
       continue;
     saw_defined_candidate = true;
 
-    if (!candidate.is_variadic && arguments.size() != candidate.parameters.size())
+    if (!candidate.is_variadic && argument_types.size() != candidate.parameters.size())
       continue;
     saw_matching_arity = true;
 
     bool compatible = true;
-    for (size_t i = 0; i < arguments.size() && i < candidate.parameters.size(); ++i) {
+    for (size_t i = 0; i < argument_types.size() && i < candidate.parameters.size(); ++i) {
       if (argument_types[i].primitive_type == PrimitiveType::UNEXPECTED ||
           !is_compatible_type(candidate.parameters[i].type, argument_types[i])) {
         compatible = false;
@@ -630,13 +932,26 @@ CallExpression::analyze_semantics(Parser&               parser,
     } else if (!saw_matching_arity) {
       print_error(error::InvalidArgumentCount, parser, diagnostic_location);
     } else {
+      size_t argument_index = mismatching_argument.value_or(0);
+      if (m_is_method && argument_index > 0)
+        --argument_index;
+
       const SourceLocation& argument_location
-          = mismatching_argument && *mismatching_argument < arguments.size()
-                ? arguments[*mismatching_argument]->source_location(diagnostic_location)
+          = mismatching_argument && argument_index < arguments.size()
+                ? arguments[argument_index]->source_location(diagnostic_location)
                 : diagnostic_location;
       print_error(error::InvalidArgumentType, parser, argument_location);
     }
     return false;
+  }
+
+  if (m_is_method && !resolved->parameters.empty() &&
+      !resolved->parameters.front().type.is_const) {
+    auto* member_callee = dynamic_cast<MemberExpression*>(callee.get());
+    if (member_callee && member_callee->object &&
+        !check_assignment_target_is_mutable(
+            member_callee->object.get(), parser, diagnostic_location))
+      return false;
   }
 
   m_label       = resolved->label;
@@ -647,13 +962,24 @@ CallExpression::analyze_semantics(Parser&               parser,
 std::string
 CallExpression::generate_ir(LabelCounters& counter,
                             Parser&        parser) {
-  // Evaluate every argument first.  A nested call may clobber the argument
-  // registers, so the outer call's Param instructions must be emitted only
-  // after all argument evaluation has finished.
+  // Evaluate the receiver (for methods) and every argument first.  A nested
+  // call may clobber the argument registers, so the outer call's Param
+  // instructions must be emitted only after all evaluation has finished.
+  std::string receiver_value;
+  if (m_is_method) {
+    auto* member_callee = dynamic_cast<MemberExpression*>(callee.get());
+    if (!member_callee || !member_callee->object)
+      return "";
+    receiver_value = member_callee->object->generate_ir(counter, parser);
+  }
+
   std::vector<std::string> argument_values;
   argument_values.reserve(arguments.size());
   for (const auto& argument : arguments)
     argument_values.push_back(argument->generate_ir(counter, parser));
+
+  if (m_is_method)
+    parser.add_instructios(AG_cscope<Param>(receiver_value, counter.function_index));
 
   for (const auto& value : argument_values)
     parser.add_instructios(AG_cscope<Param>(value, counter.function_index));
@@ -691,19 +1017,75 @@ PrimaryExpression::get_data_type() {
 AG_scope<Expression>
 MemberExpression::parse(Parser&              parser,
                         AG_scope<Expression> object) {
-  TokenName op_tok;
-  parser.peek_token_name(&op_tok);
+  const Token op_token = parser.current_token();
   parser.advance(); // consumes '.' or '->'
 
-  if (!parser.expect(TokenName::AG_IDENTIFIER, error::ExpectedMemberName)) {
+  if (!parser.check(TokenName::AG_IDENTIFIER)) {
+    print_error(error::ExpectedMemberName, parser);
     return nullptr;
   }
 
+  const Token member_token = parser.current_token();
+  parser.advance();
+
   auto member        = AG_cscope<MemberExpression>();
   member->object     = std::move(object);
-  member->field_name = parser.current_token().value;
-  member->is_arrow   = (op_tok == TokenName::AG_ARROW);
+  member->field_name = member_token.value;
+  member->is_arrow   = (op_token.token_name == TokenName::AG_ARROW);
   return member;
+}
+
+AG_scope<Expression>
+StructLiteralExpression::parse(Parser&        parser,
+                               std::string    type_name,
+                               SourceLocation location) {
+  auto literal       = AG_cscope<StructLiteralExpression>();
+  literal->type_name = std::move(type_name);
+  literal->location  = location;
+
+  if (!parser.expect(TokenName::AG_LEFT_BRACE, error::ExpectedLeftBrace))
+    return nullptr;
+
+  if (parser.match(TokenName::AG_RIGHT_BRACE))
+    return literal;
+
+  while (!parser.check(TokenName::AG_RIGHT_BRACE)) {
+    if (parser.is_at_end()) {
+      print_error(error::UnexpectedEndOfFile, parser);
+      return nullptr;
+    }
+
+    if (parser.match(TokenName::AG_DOT_DOT)) {
+      auto spread = Expression::parse_pratt(parser, 0);
+      if (!spread)
+        return nullptr;
+      literal->spread = std::move(spread);
+      parser.match(TokenName::AG_COMMA);
+      break;
+    }
+
+    FieldInitializer initializer;
+    initializer.location = {parser.current_token().line, parser.current_token().column};
+
+    AG_EXPECT_GET_ID_OR_RETURN(
+        parser, error::ExpectedFieldName, initializer.name, nullptr, TokenName::AG_IDENTIFIER);
+
+    AG_EXPECT_OR_RETURN(parser, TokenName::AG_COLON, error::ExpectedColon, nullptr);
+
+    initializer.value = Expression::parse_pratt(parser, 0);
+    if (!initializer.value)
+      return nullptr;
+
+    literal->fields.push_back(std::move(initializer));
+
+    if (!parser.match(TokenName::AG_COMMA))
+      break;
+  }
+
+  if (!parser.expect(TokenName::AG_RIGHT_BRACE, error::ExpectedRightBrace))
+    return nullptr;
+
+  return literal;
 }
 
 AG_scope<Expression>
@@ -835,7 +1217,8 @@ UniaryExpression::analyze_semantics(Parser&               parser,
   case UN_OPERATOR::PRE_DECREMENT:
   case UN_OPERATOR::POST_INCREMENT:
   case UN_OPERATOR::POST_DECREMENT: {
-    if (!is_identifier_expression(operand.get()) && !as_string_index_target(operand.get())) {
+    if (!is_identifier_expression(operand.get()) && !as_string_index_target(operand.get()) &&
+        !as_member_target(operand.get())) {
       print_error(error::InvalidAssignmentError, parser, diagnostic_location);
       return false;
     }
@@ -908,6 +1291,9 @@ BinaryExpression::analyze_semantics(Parser&               parser,
     if (identifier && identifier->primary_type == PrimitiveType::IDENTIFIER) {
       if (!check_assignment_target_is_mutable(left.get(), parser, diagnostic_location))
         return false;
+    } else if (as_member_target(left.get())) {
+      if (!check_assignment_target_is_mutable(left.get(), parser, diagnostic_location))
+        return false;
     } else {
       if (!as_string_index_target(left.get())) {
         print_error(error::InvalidAssignmentError, parser, diagnostic_location);
@@ -920,6 +1306,82 @@ BinaryExpression::analyze_semantics(Parser&               parser,
     if (left_type.primitive_type == PrimitiveType::UNEXPECTED ||
         right_type.primitive_type == PrimitiveType::UNEXPECTED ||
         !is_compatible_type(left_type, right_type)) {
+      print_error(error::InvalidOperandTypes, parser, diagnostic_location);
+      return false;
+    }
+
+    result_type       = left_type;
+    result_type_known = true;
+    return true;
+  }
+
+  if (is_compound_assignment) {
+    auto* identifier = dynamic_cast<PrimaryExpression*>(left.get());
+    if (identifier && identifier->primary_type == PrimitiveType::IDENTIFIER) {
+      if (!check_assignment_target_is_mutable(left.get(), parser, diagnostic_location))
+        return false;
+    } else if (as_member_target(left.get())) {
+      if (!check_assignment_target_is_mutable(left.get(), parser, diagnostic_location))
+        return false;
+    } else {
+      if (!as_string_index_target(left.get())) {
+        print_error(error::InvalidAssignmentError, parser, diagnostic_location);
+        return false;
+      }
+      if (!check_assignment_target_is_mutable(left.get(), parser, diagnostic_location))
+        return false;
+    }
+
+    if (left_type.primitive_type == PrimitiveType::UNEXPECTED ||
+        right_type.primitive_type == PrimitiveType::UNEXPECTED ||
+        left_type.primitive_type == PrimitiveType::VOID ||
+        right_type.primitive_type == PrimitiveType::VOID) {
+      print_error(error::InvalidOperandTypes, parser, diagnostic_location);
+      return false;
+    }
+
+    // Prefer a dedicated `operator+=`-style overload, then fall back to the
+    // normal binary operator and assign its result back to the target.
+    const std::string compound_name = "operator" + std::string(to_symbol(bin_operator)) + "=";
+    auto compound_resolution
+        = resolve_operator_overload(parser, compound_name, {left_type, right_type});
+    if (compound_resolution.ambiguous) {
+      print_error(error::AmbiguousOverload, parser, diagnostic_location);
+      return false;
+    }
+    if (compound_resolution.resolved) {
+      const auto return_type = compound_resolution.resolved->return_type;
+      if (!return_type || return_type->primitive_type == PrimitiveType::VOID ||
+          !is_compatible_type(left_type, *return_type)) {
+        print_error(error::InvalidOperandTypes, parser, diagnostic_location);
+        return false;
+      }
+      operator_label    = compound_resolution.resolved->label;
+      result_type       = left_type;
+      result_type_known = true;
+      return true;
+    }
+
+    const std::string base_name = "operator" + std::string(to_symbol(bin_operator));
+    auto base_resolution = resolve_operator_overload(parser, base_name, {left_type, right_type});
+    if (base_resolution.ambiguous) {
+      print_error(error::AmbiguousOverload, parser, diagnostic_location);
+      return false;
+    }
+    if (base_resolution.resolved) {
+      const auto return_type = base_resolution.resolved->return_type;
+      if (!return_type || return_type->primitive_type == PrimitiveType::VOID ||
+          !is_compatible_type(left_type, *return_type)) {
+        print_error(error::InvalidOperandTypes, parser, diagnostic_location);
+        return false;
+      }
+      operator_label    = base_resolution.resolved->label;
+      result_type       = left_type;
+      result_type_known = true;
+      return true;
+    }
+
+    if (!is_compatible_type(left_type, right_type)) {
       print_error(error::InvalidOperandTypes, parser, diagnostic_location);
       return false;
     }
@@ -972,6 +1434,61 @@ BinaryExpression::analyze_semantics(Parser&               parser,
 std::string
 BinaryExpression::generate_ir(LabelCounters& counter,
                               Parser&        parser) {
+  if (is_compound_assignment) {
+    auto emit_operation = [&](const std::string& current,
+                              const std::string& right_value) -> std::string {
+      if (!operator_label.empty()) {
+        parser.add_instructios(AG_cscope<Param>(current, counter.function_index));
+        parser.add_instructios(AG_cscope<Param>(right_value, counter.function_index));
+        const auto result = make_temp(counter, parser);
+        parser.add_instructios(
+            AG_cscope<FunctionCall>(operator_label, counter.function_index, result));
+        return result;
+      }
+
+      const auto result = make_temp(counter, parser);
+      parser.add_instructios(
+          AG_cscope<Binary>(result, current, right_value, bin_operator, counter.function_index));
+      return result;
+    };
+
+    auto* index = dynamic_cast<BinaryExpression*>(left.get());
+    if (index && index->bin_operator == BIN_OPERATOR::INDEXING) {
+      const auto object  = index->left->generate_ir(counter, parser);
+      const auto offset  = index->right->generate_ir(counter, parser);
+      const auto current = make_temp(counter, parser);
+      parser.add_instructios(
+          AG_cscope<Binary>(current, object, offset, BIN_OPERATOR::INDEXING, counter.function_index));
+
+      const auto right_value = right->generate_ir(counter, parser);
+      const auto updated     = emit_operation(current, right_value);
+      parser.add_instructios(
+          AG_cscope<IndexAssign>(object, offset, updated, counter.function_index));
+      return updated;
+    }
+
+    if (auto* member = as_member_target(left.get())) {
+      const auto object  = member->object->generate_ir(counter, parser);
+      const auto current = make_temp(counter, parser);
+      parser.add_instructios(AG_cscope<MemberLoad>(
+          current, object, static_cast<uint32_t>(member->byte_offset), counter.function_index));
+
+      const auto right_value = right->generate_ir(counter, parser);
+      const auto updated     = emit_operation(current, right_value);
+      parser.add_instructios(AG_cscope<MemberStore>(object,
+                                                    static_cast<uint32_t>(member->byte_offset),
+                                                    updated,
+                                                    counter.function_index));
+      return updated;
+    }
+
+    const auto target      = left->generate_ir(counter, parser);
+    const auto right_value = right->generate_ir(counter, parser);
+    const auto updated     = emit_operation(target, right_value);
+    parser.add_instructios(AG_cscope<Assign>(updated, target, counter.function_index));
+    return target;
+  }
+
   if (bin_operator == BIN_OPERATOR::ASSIGN_TO) {
     auto* index = dynamic_cast<BinaryExpression*>(left.get());
     if (index && index->bin_operator == BIN_OPERATOR::INDEXING) {
@@ -980,6 +1497,16 @@ BinaryExpression::generate_ir(LabelCounters& counter,
       const auto offset = index->right->generate_ir(counter, parser);
       parser.add_instructios(
           AG_cscope<IndexAssign>(object, offset, value, counter.function_index));
+      return value;
+    }
+
+    if (auto* member = as_member_target(left.get())) {
+      const auto value  = right->generate_ir(counter, parser);
+      const auto object = member->object->generate_ir(counter, parser);
+      parser.add_instructios(AG_cscope<MemberStore>(object,
+                                                    static_cast<uint32_t>(member->byte_offset),
+                                                    value,
+                                                    counter.function_index));
       return value;
     }
 
@@ -1056,6 +1583,32 @@ UniaryExpression::generate_ir(LabelCounters& counter,
                : old_value;
   }
 
+  if (auto* member = as_member_target(operand.get())) {
+    const auto object = member->object->generate_ir(counter, parser);
+    const auto old_value = make_temp(counter, parser);
+    parser.add_instructios(AG_cscope<MemberLoad>(old_value,
+                                                 object,
+                                                 static_cast<uint32_t>(member->byte_offset),
+                                                 counter.function_index));
+
+    const auto updated = make_temp(counter, parser);
+    const auto op      = (un_operator == UN_OPERATOR::PRE_INCREMENT ||
+                          un_operator == UN_OPERATOR::POST_INCREMENT)
+                             ? BIN_OPERATOR::ADDITION
+                             : BIN_OPERATOR::SUBTRACTION;
+    parser.add_instructios(
+        AG_cscope<Binary>(updated, old_value, "1", op, counter.function_index));
+    parser.add_instructios(AG_cscope<MemberStore>(object,
+                                                  static_cast<uint32_t>(member->byte_offset),
+                                                  updated,
+                                                  counter.function_index));
+
+    return (un_operator == UN_OPERATOR::PRE_INCREMENT ||
+            un_operator == UN_OPERATOR::PRE_DECREMENT)
+               ? updated
+               : old_value;
+  }
+
   const std::string value = operand->generate_ir(counter, parser);
 
   switch (un_operator) {
@@ -1115,6 +1668,8 @@ PrimaryExpression::generate_ir(LabelCounters& counter,
   if (primary_type == PrimitiveType::IDENTIFIER) {
     if (auto variable = get_ir_table().lookup_source(counter.function_index, value))
       return variable->name;
+    if (auto global = get_ir_table().lookup_global_source(value))
+      return global->name;
   }
 
   return std::string(value);

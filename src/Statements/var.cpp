@@ -1,6 +1,7 @@
 #include "Statements/var.hpp"
 #include "Expressions/Expression.hpp"
 #include "IR/Assign.hpp"
+#include "IR/GlobalVariable.hpp"
 #include "IR/IRTable.hpp"
 #include "Parser.hpp"
 #include "Statements/Statements.hpp"
@@ -39,6 +40,17 @@ VarStatement::ParseVar(Parser& parser) {
 void
 VarStatement::generate_ir(LabelCounters& counter,
                           Parser&        parser) {
+  if (counter.function_index < 0) {
+    auto global = get_ir_table().declare_global(std::string(m_name),
+                                                get_type_size(m_datatype),
+                                                false,
+                                                global_initializer(m_expr.get()));
+    if (global)
+      parser.add_instructios(
+          AG_cscope<GlobalVariable>(global->name, global->initializer, counter.function_index));
+    return;
+  }
+
   auto variable = get_ir_table().declare_user(counter.function_index,
                                               std::string(m_name),
                                               get_type_size(m_datatype));

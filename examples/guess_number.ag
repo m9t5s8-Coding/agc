@@ -1,0 +1,104 @@
+func strlen(test: string) -> int;
+func stoi(str: string) -> int;
+func to_string(value: int) -> string;
+
+
+func main() -> int {
+    let guess_number: int = 48;
+    var msg: string;
+    var buffer: string = alloc(32);
+    var correct : int = 0;
+    while (correct == 0)
+    {
+        msg = "Enter a number from 0 - 100: ";
+        write(msg, strlen(msg));
+        read(buffer, 32);
+        var number: int = stoi(buffer);
+        
+        if (number > guess_number) {
+            msg = "Lower!\n";
+            write(msg, strlen(msg));
+        } else {
+            if (number < guess_number) {
+                msg = "Higher!\n";
+                write(msg, strlen(msg));
+            } else {
+                msg = "Bingo!\n";
+                write(msg, strlen(msg));
+                correct = 1;
+            }
+        }
+    }
+    free(buffer);
+    return 0;
+}
+
+func strlen(text: string) -> int {
+    var length: int = 0;
+    while (text[length] != 0) {
+        length = length + 1;
+    }
+    return length;
+}
+
+func stoi(str: string) -> int {
+    var number: int = 0;
+    var index: int = 0;
+    let str_len: int = strlen(str);
+    var sign: int = 0;
+    while (index < str_len) {
+        if (str[index] >= 48 && str[index] <= 57) {
+            number = number * 10 +(str[index] - 48);
+        }
+        index++;
+    }
+    return number;
+}
+
+func to_string(value: int) -> string {
+    var buffer: string = alloc(32);
+    var number: int = value;
+    var length: int = 0;
+    var negative: int = 0;
+    var digit: int = 0;
+    var left: int = 0;
+    var right: int = 0;
+    var temporary: int = 0;
+
+    if (number == 0) {
+        buffer[0] = 48;  # '0'
+        buffer[1] = 0;
+        return buffer;
+    }
+
+    if (number < 0) {
+        negative = 1;
+    }
+
+    while (number != 0) {
+        digit = number % 10;
+        if (digit < 0) {
+            digit = 0 - digit;
+        }
+        buffer[length] = 48 + digit;
+        length = length + 1;
+        number = number / 10;
+    }
+
+    if (negative == 1) {
+        buffer[length] = 45;  # '-'
+        length = length + 1;
+    }
+    buffer[length] = 0;
+
+    left = 0;
+    right = length - 1;
+    while (left < right) {
+        temporary = buffer[left];
+        buffer[left] = buffer[right];
+        buffer[right] = temporary;
+        left = left + 1;
+        right = right - 1;
+    }
+    return buffer;
+}

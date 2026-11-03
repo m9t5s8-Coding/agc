@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -101,7 +102,56 @@ struct StructDefinition {
   size_t                    size_in_bytes = 0;
   size_t                    alignment     = 0;
   SourceLocation            location;
+
+  const StructMember*
+  find_member(std::string_view member_name) const {
+    for (const auto& member : members) {
+      if (member.name == member_name)
+        return &member;
+    }
+    return nullptr;
+  }
 };
+
+// Translation-unit-wide registry of user-defined struct layouts.  Struct
+// declarations are parsed before the code that uses them, so the registry is
+// populated during parsing and consulted by both semantic analysis and code
+// generation.
+class StructTable {
+public:
+  bool
+  declare(StructDefinition definition) {
+    if (definition.name.empty() || m_structs.contains(definition.name))
+      return false;
+
+    m_structs.emplace(definition.name, std::move(definition));
+    return true;
+  }
+
+  const StructDefinition*
+  lookup(std::string_view name) const {
+    auto it = m_structs.find(std::string(name));
+    return it == m_structs.end() ? nullptr : &it->second;
+  }
+
+  void
+  reset() {
+    m_structs.clear();
+  }
+
+private:
+  std::unordered_map<std::string, StructDefinition> m_structs;
+};
+
+[[nodiscard]]
+StructTable&
+get_struct_table();
+
+// Build the pointer-sized value type used for a struct in expressions and
+// stack slots.  Struct values are represented by the address of their
+// storage; the definition itself carries the byte layout.
+DataType
+make_struct_type(std::string_view name);
 
 struct EnumConstant {
   std::string    name;
@@ -168,7 +218,9 @@ struct FunctionEntry {
 // by the address of their data, so they take one machine word.
 inline uint32_t
 get_type_size(const DataType& type) {
-  if (type.kind == TypeKind::POINTER)
+  // Struct values are pointers to their storage, so a struct variable occupies
+  // one machine word even though the pointee layout may be much larger.
+  if (type.kind == TypeKind::POINTER || type.kind == TypeKind::STRUCT)
     return 8;
 
   if (type.size_in_bytes != 0)
@@ -390,6 +442,14 @@ generate_function_label(std::string_view                      function_name,
 }
 
 class Parser;
+class Expression;
+
+// Convert a top-level initializer expression into a constant assembly/LLVM
+// initializer.  Globals currently support literal integers, string literals,
+// and unary +/- around those literals.
+std::string
+global_initializer(Expression* expression);
+
 void
 print_error(const std::string_view error,
             Parser&                parser);

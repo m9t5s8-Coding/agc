@@ -181,8 +181,9 @@ public:
   AG_scope<Expression> right;
   std::string          operator_label;
   DataType             result_type;
-  bool                 result_type_known = false;
-  bool                 is_string_index   = false;
+  bool                 result_type_known     = false;
+  bool                 is_string_index       = false;
+  bool                 is_compound_assignment = false;
 };
 
 class UniaryExpression : public Expression {
@@ -253,24 +254,64 @@ public:
   std::string          field_name;
   bool                 is_arrow = false;
 
+  // Resolved during semantic analysis so IR generation does not need to walk
+  // the symbol/struct tables again.
+  DataType member_type;
+  size_t   byte_offset   = 0;
+  bool     member_found  = false;
+
   static AG_scope<Expression>
   parse(Parser&              parser,
         AG_scope<Expression> object);
 
   virtual bool
   analyze_semantics(Parser&,
-                    const SourceLocation&) override {
-    return true;
-  }
+                    const SourceLocation&) override;
 
   virtual PrimitiveType
   get_type() override;
 
+  virtual DataType
+  get_data_type() override;
+
   virtual std::string
   generate_ir(LabelCounters& counter,
-              Parser&         parser) override {
-    return "";
-  }
+              Parser&         parser) override;
+};
+
+// `Point { x: 3, y: 4 }` and the spread form `Point { x: 5, ..other }`.
+class StructLiteralExpression : public Expression {
+public:
+  struct FieldInitializer {
+    std::string          name;
+    AG_scope<Expression> value;
+    SourceLocation       location;
+  };
+
+  std::string                    type_name;
+  std::vector<FieldInitializer>  fields;
+  AG_scope<Expression>           spread;
+
+  static AG_scope<Expression>
+  parse(Parser&            parser,
+        std::string        type_name,
+        SourceLocation     location);
+
+  virtual bool
+  analyze_semantics(Parser&,
+                    const SourceLocation&) override;
+
+  virtual PrimitiveType
+  get_type() override;
+
+  virtual DataType
+  get_data_type() override;
+
+  virtual std::string
+  generate_ir(LabelCounters& counter,
+              Parser&         parser) override;
+
+  DataType result_type;
 };
 
 class CallExpression : public Expression {
@@ -299,6 +340,7 @@ public:
 private:
   std::string m_label;
   DataType    m_result_type;
+  bool        m_is_method = false;
 };
 
 class IndexExpression : public Expression {

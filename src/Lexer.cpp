@@ -17,9 +17,16 @@ Lexer::contains(const std::string_view str_view,
                 Token&                 out_token) {
   constexpr static std::pair<std::string_view, Token> s_keyword_map[] = {
 
+      {"and", {TokenName::AG_LOGICAL_AND}},
+      {"or", {TokenName::AG_LOGICAL_OR}},
+      {"not", {TokenName::AG_LOGICAL_NOT}},
       {"exit", {TokenName::AG_EXIT}},
       {"func", {TokenName::AG_FUNC}},
       {"operator", {TokenName::AG_OPERATOR}},
+      {"struct", {TokenName::AG_STRUCT}},
+      {"impl", {TokenName::AG_IMPL}},
+      {"pub", {TokenName::AG_PUB}},
+      {"mut", {TokenName::AG_MUT}},
       {"return", {TokenName::AG_RETURN}},
       {"write", {TokenName::AG_WRITE}},
       {"read", {TokenName::AG_READ}},
@@ -214,6 +221,9 @@ Lexer::scan_char(const char c) {
     if (peek() == '&') {
       increase();
       add_token({TokenName::AG_LOGICAL_AND});
+    } else if (peek() == '=') {
+      increase();
+      add_token({TokenName::AG_BITWISE_AND_ASSIGNMENT});
     } else {
       add_token({TokenName::AG_REFERENCE});
     }
@@ -247,6 +257,9 @@ Lexer::scan_char(const char c) {
     if (peek() == '|') {
       increase();
       add_token({TokenName::AG_LOGICAL_OR});
+    } else if (peek() == '=') {
+      increase();
+      add_token({TokenName::AG_BITWISE_OR_ASSIGNMENT});
     } else {
       add_token({TokenName::AG_BITWISE_OR});
     }
@@ -260,14 +273,24 @@ Lexer::scan_char(const char c) {
   }
 
   case '^': {
-    add_token({TokenName::AG_BITWISE_XOR});
+    if (peek() == '=') {
+      increase();
+      add_token({TokenName::AG_BITWISE_XOR_ASSIGNMENT});
+    } else {
+      add_token({TokenName::AG_BITWISE_XOR});
+    }
     return true;
   }
 
   case '<': {
     if (peek() == '<') {
       increase();
-      add_token({TokenName::AG_LEFT_SHIFT});
+      if (peek() == '=') {
+        increase();
+        add_token({TokenName::AG_LEFT_SHIFT_ASSIGNMENT});
+      } else {
+        add_token({TokenName::AG_LEFT_SHIFT});
+      }
     } else if (peek() == '=') {
       increase();
       add_token({TokenName::AG_LESS_EQUAL});
@@ -281,7 +304,12 @@ Lexer::scan_char(const char c) {
   case '>': {
     if (peek() == '>') {
       increase();
-      add_token({TokenName::AG_RIGHT_SHIFT});
+      if (peek() == '=') {
+        increase();
+        add_token({TokenName::AG_RIGHT_SHIFT_ASSIGNMENT});
+      } else {
+        add_token({TokenName::AG_RIGHT_SHIFT});
+      }
     } else if (peek() == '=') {
       increase();
       add_token({TokenName::AG_GREATER_EQUAL});
@@ -293,7 +321,12 @@ Lexer::scan_char(const char c) {
   }
 
   case '.': {
-    add_token({TokenName::AG_DOT});
+    if (peek() == '.') {
+      increase();
+      add_token({TokenName::AG_DOT_DOT});
+    } else {
+      add_token({TokenName::AG_DOT});
+    }
     return true;
   }
 
@@ -418,19 +451,15 @@ Lexer::create_string_literal() {
 
     // Match the shared diagnostic renderer: a three-space gutter followed by
     // the source prefix, preserving tabs so the caret lines up in a terminal.
-    std::string caret_prefix;
+    std::string  caret_prefix;
     const size_t prefix_size = std::min<size_t>(start_column, line_text.size());
     for (size_t i = 0; i < prefix_size; ++i)
       caret_prefix.push_back(line_text[i] == '\t' ? '\t' : ' ');
     if (start_column > prefix_size)
       caret_prefix.append(start_column - prefix_size, ' ');
 
-    m_error_message += std::format("{}:{}: {}\n   {}\n   {}^\n",
-                                   m_filename,
-                                   start_line,
-                                   error::UnterminatedString,
-                                   line_text,
-                                   caret_prefix);
+    m_error_message += std::format(
+        "{}:{}: {}\n   {}\n   {}^\n", m_filename, start_line, error::UnterminatedString, line_text, caret_prefix);
   }
 
   m_decoded_strings.push_back(std::move(decoded));

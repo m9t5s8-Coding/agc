@@ -1,6 +1,7 @@
 #include "Parser.hpp"
 
 #include "IR/IRTable.hpp"
+#include "LLVM/LLVMBackend.hpp"
 #include "IR/Instructions.hpp"
 #include "Statements/ExpressionStatement.hpp"
 #include "Statements/Statements.hpp"
@@ -9,9 +10,11 @@
 #include "Statements/exit.hpp"
 #include "Statements/function.hpp"
 #include "Statements/if.hpp"
+#include "Statements/impl.hpp"
 #include "Statements/let.hpp"
 #include "Statements/read.hpp"
 #include "Statements/return.hpp"
+#include "Statements/struct.hpp"
 #include "Statements/var.hpp"
 #include "Statements/while.hpp"
 #include "Statements/write.hpp"
@@ -72,6 +75,7 @@ Parser::parse() {
 
   m_ir_text.clear();
   m_assembly_text.clear();
+  m_llvm_text.clear();
 
   if (!m_invalid_syntax) {
     while (!is_at_end()) {
@@ -127,6 +131,12 @@ Parser::parse() {
     for (const auto& instr : m_instructions) {
       m_ir_text += instr->to_string();
     }
+
+    // The LLVM backend is intentionally independent from the native NASM
+    // backend.  It translates the same linear IR, so both backends see
+    // identical program structure and semantics.
+    if (m_emit_llvm)
+      m_llvm_text = generate_llvm_ir(*this);
 
     for (const auto& instr : m_instructions) {
       instr->generate_code(context);
@@ -195,6 +205,12 @@ Parser::parse_statement() {
   }
   case TokenName::AG_FUNC: {
     return FunctionStatement::ParseFunction(*this);
+  }
+  case TokenName::AG_STRUCT: {
+    return StructStatement::ParseStruct(*this);
+  }
+  case TokenName::AG_IMPL: {
+    return ImplStatement::ParseImpl(*this);
   }
   case TokenName::AG_OPERATOR: {
     if (looks_like_operator_declaration(*this))

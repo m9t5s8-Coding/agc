@@ -53,6 +53,7 @@ private:
   function_label() const;
 
   std::string          m_function_name;
+  std::string          m_owner_type;
   FunctionParameterVec m_parameters;
   DataType             m_return_type;
   AG_scope<Statements> m_function_body;

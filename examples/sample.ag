@@ -1,21 +1,224 @@
+# AGC feature tour
+#
+# This sample exercises the language features currently supported by the
+# compiler:
+#   * functions, overloading, let/var, if/else, while, return, write
+#   * heap allocation with alloc/free
+#   * string indexing and byte-buffer indexing
+#   * binary operators in infix and canonical forms, plus explicit calls
+#   * overloaded stream operators and user-defined operator[]
+#   * prefix/postfix ++ and --, including string-index targets
+#   * built-in and overloaded unary operators
+#   * pointer and user-defined types such as ostream*
+
+func strlen(text : string) -> int {
+  var length : int = 0;
+  while (text[length] != 0) {
+    length = length + 1;
+  }
+  return length;
+}
+
+# Prototypes followed by definitions, plus overloads by parameter type.
+func describe(value : int) -> string;
+func describe(value : string) -> string;
+
+func describe(value : int) -> string {
+  return "integer overload\n";
+}
+
+func describe(value : string) -> string {
+  return value;
+}
+
+func to_string(value : int) -> string {
+  var buffer : string = alloc(32);
+  var number : int = value;
+  var length : int = 0;
+  var negative : int = 0;
+  var digit : int = 0;
+  var left : int = 0;
+  var right : int = 0;
+  var temporary : int = 0;
+
+  if (number == 0) {
+    buffer[0] = 48;  # '0'
+    buffer[1] = 0;
+    return buffer;
+  }
+
+  if (number < 0) {
+    negative = 1;
+  }
+
+  while (number != 0) {
+    digit = number % 10;
+    if (digit < 0) {
+      digit = 0 - digit;
+    }
+    buffer[length] = 48 + digit;
+    length = length + 1;
+    number = number / 10;
+  }
+
+  if (negative == 1) {
+    buffer[length] = 45;  # '-'
+    length = length + 1;
+  }
+  buffer[length] = 0;
+
+  left = 0;
+  right = length - 1;
+  while (left < right) {
+    temporary = buffer[left];
+    buffer[left] = buffer[right];
+    buffer[right] = temporary;
+    left = left + 1;
+    right = right - 1;
+  }
+  return buffer;
+}
+
+# Canonical binary operator.  Every integer addition in this sample uses this
+# overload; the guard permits the built-in addition inside its own body.
+operator+(left : int, right : int) -> int {
+  return left + right;
+}
+
+# Canonical string concatenation operator.
+operator+(left : string, right : string) -> string {
+  let left_size : int = strlen(left);
+  let right_size : int = strlen(right);
+  var result : string = alloc(left_size + right_size + 1);
+  var index : int = 0;
+
+  while (index < left_size) {
+    result[index] = left[index];
+    index = index + 1;
+  }
+
+  index = 0;
+  while (index < right_size) {
+    result[left_size + index] = right[index];
+    index = index + 1;
+  }
+
+  result[left_size + right_size] = 0;
+  return result;
+}
+
+# Infix declaration form for a string stream.
+operator (text : string) << (value : string) -> string {
+  return text + value;
+}
+
+operator (text : string) << (value : int) -> string {
+  return text + to_string(value);
+}
+
+# Infix declaration form using a pointer to a user-defined type.  This is the
+# ostream-style operator requested for the language.
+operator (stream : ostream*) << (value : int) -> ostream* {
+  return stream;
+}
+
+# Canonical unary operator overloads.
+operator-(value : int) -> int {
+  return 0 - value;
+}
+
+operator*(value : int*) -> int {
+  return 77;
+}
+
+# Canonical user-defined indexing.  The built-in string index still handles
+# string buffers; this overload handles int* values.
+operator[](values : int*, index : int) -> int {
+  return 100 + index;
+}
+
 func main() -> int {
-  let greeting : string = "Hello from AGC!\n";
-  var limit : int = 10;
-  var sum : int = 0;
-  var i : int = 1;
+  let title : string = "AGC feature tour\n";
+  write(title, strlen(title));
 
-  write(greeting, 16);
+  # Overloaded functions and prototypes.
+  let integer_description : string = describe(7);
+  let string_description : string = describe("string overload\n");
+  write(integer_description, strlen(integer_description));
+  write(string_description, strlen(string_description));
 
-  while (i <= limit) {
-    sum = sum + i * i;
-    i = i + 1;
+  # Implicit and explicit operator calls.
+  let implicit_sum : int = 4 + 5;
+  let explicit_sum : int = operator+(4, 5);
+  let plus_total : int = implicit_sum + explicit_sum;
+
+  # Infix stream operators: string << string and string << int.
+  var text : string = "operators";
+  text = text << " + indexing";
+  text = text << 42;
+  write(text, strlen(text));
+  write("\n", 1);
+
+  # Explicit calls for binary operators.
+  let explicit_text : string = operator+(text, "!");
+  let explicit_stream : string = operator<<(explicit_text, " explicit");
+  write(explicit_stream, strlen(explicit_stream));
+  write("\n", 1);
+
+  # ostream*-style operator from the requested syntax.
+  var stream : ostream*;
+  if ((stream << 7) == stream) {
+    let stream_message : string = "ostream* operator<< works\n";
+    write(stream_message, strlen(stream_message));
   }
 
-  if (sum > 300) {
-    write("sum is greater than 300\n", 24);
+  # User-defined operator[] and indexing inside a larger expression.
+  var numbers : int*;
+  let indexed : int = numbers[2];
+  let explicit_indexed : int = operator[](numbers, 3);
+  let indexed_sum : int = numbers[1] + numbers[2];
+
+  # Overloaded unary operators.
+  var pointer : int*;
+  let dereferenced : int = *pointer;
+  let explicit_dereferenced : int = operator*(pointer);
+  var counter : int = 5;
+  let post_increment : int = counter++;
+  let pre_increment : int = ++counter;
+  let post_decrement : int = counter--;
+  let pre_decrement : int = --counter;
+  let negative : int = -counter;
+  let explicit_negative : int = operator-(counter);
+
+  # Built-in unary operators.
+  let complemented : int = ~counter;
+  let logical_not : int = !counter;
+  let positive : int = +counter;
+
+  # String-buffer indexing, including prefix/postfix updates.
+  var buffer : string = alloc(4);
+  buffer[0] = 65;  # 'A'
+  buffer[1] = 66;  # 'B'
+  buffer[2] = 0;
+  let old_byte : int = buffer[0]++;
+  let new_byte : int = ++buffer[0];
+  let byte_total : int = old_byte + new_byte;
+  write(buffer, 2);  # post++ made 'B', pre++ made 'C'
+  write("\n", 1);
+
+  # Keep the results observable and exercise logical operators.
+  let total : int = plus_total + indexed + explicit_indexed + indexed_sum + dereferenced + explicit_dereferenced + post_increment + pre_increment + post_decrement + pre_decrement + negative + explicit_negative + complemented + logical_not + positive + byte_total;
+  if (total > 0 && byte_total > 0) {
+    let done : string = "all feature checks executed\n";
+    write(done, strlen(done));
   } else {
-    write("sum is 300 or less\n", 19);
+    let failed : string = "a feature check failed\n";
+    write(failed, strlen(failed));
   }
 
-  return(sum % 251);
+  free(buffer);
+  free(text);
+  free(explicit_text);
+  free(explicit_stream);
+  return 0;
 }

@@ -23,6 +23,12 @@ resolve_operand(int               function_index,
   if (auto variable = get_ir_table().lookup_source(function_index, value))
     return std::format("qword [rbp - {}]", variable->offset);
 
+  // Module-level variables are addressed directly rather than through rbp.
+  if (auto global = get_ir_table().lookup_global_data(value))
+    return std::format("qword [{}]", global->name);
+  if (auto global = get_ir_table().lookup_global_source(value))
+    return std::format("qword [{}]", global->name);
+
   return std::string(value);
 }
 
@@ -37,6 +43,11 @@ resolve_destination(int              function_index,
 
   if (auto variable = get_ir_table().lookup_source(function_index, value))
     return std::format("qword [rbp - {}]", variable->offset);
+
+  if (auto global = get_ir_table().lookup_global_data(value))
+    return std::format("qword [{}]", global->name);
+  if (auto global = get_ir_table().lookup_global_source(value))
+    return std::format("qword [{}]", global->name);
 
   return {};
 }
