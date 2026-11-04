@@ -7,17 +7,21 @@
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 #include "Statements/body.hpp"
+#include "Statements/enum.hpp"
 #include "Statements/exit.hpp"
 #include "Statements/function.hpp"
 #include "Statements/if.hpp"
 #include "Statements/impl.hpp"
+#include "Statements/import.hpp"
 #include "Statements/let.hpp"
+#include "Statements/module.hpp"
 #include "Statements/read.hpp"
 #include "Statements/return.hpp"
 #include "Statements/struct.hpp"
 #include "Statements/var.hpp"
 #include "Statements/while.hpp"
 #include "Statements/write.hpp"
+#include "SymbolTable.hpp"
 #include "Token.hpp"
 #include "error_msg.hpp"
 #include "json.hpp"
@@ -67,6 +71,123 @@ looks_like_operator_declaration(const Parser& parser) {
          parser.peek_token(offset).token_name == TokenName::AG_COLON;
 }
 } // namespace
+
+std::string
+Parser::resolve_symbol_name(std::string_view name) const {
+  const std::string raw(name);
+  const auto        separator = raw.find("::");
+  const std::string first     = raw.substr(0, separator);
+  const std::string& scope    = current_module_path();
+
+  const auto find_symbol_alias = [&](std::string_view search_scope) -> const std::string* {
+    return get_module_table().find_symbol_alias(search_scope, raw);
+  };
+  const auto find_module_alias = [&](std::string_view search_scope) -> const std::string* {
+    return get_module_table().find_module_alias(search_scope, first);
+  };
+
+  if (separator == std::string::npos) {
+    if (const auto* target = find_symbol_alias(scope))
+      return *target;
+  }
+
+  if (const auto* target = find_module_alias(scope))
+    return *target + (separator == std::string::npos ? std::string{} : raw.substr(separator));
+
+  // Names that are already qualified are first tried relative to the active
+  // module, which makes `inner::helper()` work inside `mod outer { ... }`.
+  if (!scope.empty()) {
+    const std::string candidate = scope + "::" + raw;
+    if (!get_function_table().lookup_all(candidate).empty() ||
+        get_struct_table().lookup(candidate) != nullptr ||
+        get_enum_table().lookup(candidate) != nullptr)
+      return candidate;
+  }
+
+  if (separator == std::string::npos) {
+    if (const auto* target = find_symbol_alias({}))
+      return *target;
+  }
+
+  if (const auto* target = find_module_alias({}))
+    return *target + (separator == std::string::npos ? std::string{} : raw.substr(separator));
+
+  return raw;
+}
+
+std::string
+Parser::resolve_type_name(std::string_view name) const {
+  const std::string raw(name);
+  const auto        separator = raw.find("::");
+  const std::string first     = raw.substr(0, separator);
+  const std::string& scope    = current_module_path();
+
+  if (separator == std::string::npos) {
+    if (const auto* target = get_module_table().find_symbol_alias(scope, raw))
+      return *target;
+  }
+
+  if (const auto* target = get_module_table().find_module_alias(scope, first))
+    return *target + (separator == std::string::npos ? std::string{} : raw.substr(separator));
+
+  if (!scope.empty()) {
+    const std::string candidate = scope + "::" + raw;
+    if (get_struct_table().lookup(candidate) != nullptr ||
+        get_enum_table().lookup(candidate) != nullptr)
+      return candidate;
+  }
+
+  if (separator == std::string::npos) {
+    if (const auto* target = get_module_table().find_symbol_alias({}, raw))
+      return *target;
+  }
+
+  if (const auto* target = get_module_table().find_module_alias({}, first))
+    return *target + (separator == std::string::npos ? std::string{} : raw.substr(separator));
+
+  return raw;
+}
+
+void
+Parser::parse_module_tokens(Lexer&                             lexer,
+                            std::string                        module_path,
+                            std::vector<AG_scope<Statements>>& statements) {
+  Lexer*       saved_lexer  = m_lexer;
+  TokensVector saved_tokens = std::move(m_tokens);
+  const size_t saved_index  = m_index;
+  const Token  saved_eot    = m_EOToken;
+
+  set_lexer(lexer);
+  m_index = 0;
+  push_module_path(std::move(module_path));
+
+  while (!is_at_end() && !m_invalid_syntax) {
+    const size_t position_before_statement = m_index;
+    auto         statement                 = parse_statement();
+    if (!statement) {
+      m_invalid_syntax = true;
+      if (m_error_message.empty())
+        print_error(is_at_end() ? error::UnexpectedEndOfFile : error::UnexpectedToken, *this);
+      break;
+    }
+
+    statements.emplace_back(std::move(statement));
+
+    if (m_index == position_before_statement) {
+      m_invalid_syntax = true;
+      if (m_error_message.empty())
+        print_error(is_at_end() ? error::UnexpectedEndOfFile : error::UnexpectedToken, *this);
+      break;
+    }
+  }
+
+  pop_module_path();
+
+  m_lexer   = saved_lexer;
+  m_tokens  = std::move(saved_tokens);
+  m_index   = saved_index;
+  m_EOToken = saved_eot;
+}
 
 void
 Parser::parse() {
@@ -209,8 +330,23 @@ Parser::parse_statement() {
   case TokenName::AG_STRUCT: {
     return StructStatement::ParseStruct(*this);
   }
+  case TokenName::AG_ENUM: {
+    return EnumStatement::ParseEnum(*this);
+  }
   case TokenName::AG_IMPL: {
     return ImplStatement::ParseImpl(*this);
+  }
+  case TokenName::AG_IMPORT: {
+    return ImportStatement::ParseImport(*this);
+  }
+  case TokenName::AG_MOD: {
+    return ModuleStatement::ParseModule(*this);
+  }
+  case TokenName::AG_PUB: {
+    // Visibility is accepted for source compatibility; the current language
+    // has a single visibility level.
+    advance();
+    return parse_statement();
   }
   case TokenName::AG_OPERATOR: {
     if (looks_like_operator_declaration(*this))

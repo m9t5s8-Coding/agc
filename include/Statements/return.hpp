@@ -12,6 +12,12 @@ public:
   static AG_scope<Statements>
   ParseReturn(Parser& parser);
 
+  // Wrap an expression parsed from `func f() -> T => expr;` in a return
+  // statement so expression-bodied functions share the normal return path.
+  static AG_scope<Statements>
+  Create(AG_scope<Expression> expression,
+         SourceLocation      location);
+
   virtual void
   generate_ir(LabelCounters&,
               Parser&) override;

@@ -1,0 +1,708 @@
+================================================================================
+                    AG LANGUAGE - DESIGN AND COMPILER PLAN
+================================================================================
+Version: 0.1 (draft)
+File extension: .ag
+Compiler name: agc
+Status: design phase
+
+
+--------------------------------------------------------------------------------
+PART 1. WHAT THIS IS ABOUT
+--------------------------------------------------------------------------------
+
+1.1 One-paragraph summary
+
+  ag is a statically typed, compiled, general-purpose systems language. It is
+  designed to feel like a modern high-level language (Swift, Kotlin, Rust)
+  while still allowing C-level control (pointers, unsafe blocks, manual
+  allocation, FFI). It is not a clone of any single language. Each feature is
+  deliberately borrowed from the language that does that feature best, and
+  then unified under one consistent grammar.
+
+1.2 The problem it tries to solve
+
+  - C is fast and simple but unsafe and has weak abstractions.
+  - Rust is safe and expressive but has a heavy syntax and a steep learning
+    curve (lifetimes, turbofish, macros).
+  - Go is simple but has weak generics, no sum types, and clumsy errors.
+  - Zig is great for compile-time work but is intentionally minimal.
+  - Swift/Kotlin read beautifully but are tied to heavy runtimes.
+
+  ag aims for: readable like Swift/Kotlin, safe by default like Rust, explicit
+  and low-level when asked like Zig/C, and simple concurrency like Go.
+
+1.3 Design goals (in priority order)
+
+  1. Readability: code should be understandable on first read.
+  2. Safety by default: no null surprises, no silent errors, no data races
+     in safe code. Danger is opt-in via `unsafe`.
+  3. Predictable performance: no hidden allocations, no GC, no hidden control
+     flow. What you write is what runs.
+  4. One obvious way: each feature has one canonical syntax (see 1.5).
+  5. Easy to parse: the grammar must be parseable with a hand-written
+     recursive-descent parser and bounded lookahead.
+  6. Small core, powerful library: keep the compiler simple, move features
+     into the standard library where possible.
+
+1.4 Non-goals
+
+  - Not a scripting language. No dynamic typing, no eval.
+  - No garbage collector and no mandatory runtime.
+  - No implicit conversions between numeric types.
+  - No exceptions. Errors are values.
+  - No macros in v1 (comptime functions cover most use cases).
+  - No inheritance. Composition and protocols only.
+
+1.5 Core principle: one canonical form per feature
+
+  When mixing syntax from several languages, two spellings for the same
+  concept create parser ambiguity and style wars. Every feature below has
+  exactly one spelling. Examples:
+    - Error propagation is `try`, never postfix `?`.
+    - Member access is `.`, never `::`.
+    - Step in ranges is `step`, never `by`.
+
+1.6 Where each idea comes from
+
+  Feature                                         Borrowed from
+  ----------------------------------------------  ----------------------------
+  let / var, func, guard, ?. and ??               Swift
+  protocol, extension, try, is-patterns           Swift / Kotlin
+  Inline generic bounds <T: Ord>                  Swift / Kotlin
+  copy(...) for struct update                     Kotlin
+  step in ranges                                  Kotlin
+  Import with braces: import ag.io.{println}      Kotlin / Scala
+  comptime, orelse, defer, named test blocks      Zig
+  spawn, channel operator <-, select              Go
+  enum with payloads, match, Result, Option       Rust
+  Ownership, move, & and &mut references          Rust
+  => expression bodies, async/await, ??=          C# / JavaScript
+  Pipeline operator |>                            F# / Elixir
+  until, in, with, f-strings, raw/multiline str   Ruby / Python
+  extern "c", sizeof, pointers, ?:, bit ops       C
+  @attribute annotations                          Java / Python decorators
+  Literal forms 0xFF_FF, 0b1010, 1_000            Rust / Python
+
+
+--------------------------------------------------------------------------------
+PART 2. LANGUAGE SPECIFICATION
+--------------------------------------------------------------------------------
+
+2.1 Lexical structure
+
+  Source encoding: UTF-8.
+  Comments:
+    // line comment
+    /* block comment, nestable */
+    /// doc comment (attaches to next declaration)
+
+  Identifiers: [A-Za-z_][A-Za-z0-9_]*  (Unicode letters allowed in v2)
+
+  Keywords (reserved):
+    import mod pub const static var let func struct enum trait protocol
+    extension impl type operator where if else match while until for loop
+    in break continue return guard defer with unsafe async await spawn
+    comptime move box mut self Self true false null as is step test orelse
+    try extern select
+
+  Integer literals:
+    42   1_000_000   0xFF_FF   0o755   0b1010_0110
+  Float literals:
+    3.14   1e-9   2.5e10
+  Char literals:   'a'  '\t'  '\u{1F600}'
+  String literals:
+    "normal with \n escapes"
+    r"raw \n string, no escapes"
+    """multi-line, indentation stripped to closing quotes"""
+    f"interpolated {expr} with format {value:>6} {x:#x} {pi:.2}"
+
+  Operators and punctuation (longest match wins):
+    + - * / % **            arithmetic (** is power, right-associative)
+    == != < <= > >=         comparison
+    && || !                 logical
+    & | ^ ~ << >>           bitwise
+    = += -= *= /= %= &= |= ^= <<= >>= ??=    assignment
+    ?? ?. ?                 optional coalesce, chaining, type suffix
+    |> ..  ..=  ...         pipeline, ranges, spread/variadic
+    -> =>                   function type / expression body
+    <-                      channel send / receive
+    @                       attribute / pattern binding
+    . , : ; ( ) { } [ ]
+
+  Statement termination:
+    Semicolons are OPTIONAL. A newline ends a statement when the last token
+    on the line could end a statement (identifier, literal, `)`, `]`, `}`,
+    `return`, `break`, `continue`, `?`, `!`). This is the Go/Swift rule.
+    A line ending with an operator or `,` or `(` continues onto the next line.
+    A line beginning with `.` or `|>` continues the previous expression.
+    Semicolons are still allowed to put several statements on one line.
+
+2.2 Types
+
+  Primitive types:
+    int  (platform word)   i8 i16 i32 i64   u8 u16 u32 u64
+    byte (alias u8)        float (f64)      f32 f64
+    bool   char   string   void   never
+
+  Compound types:
+    T[]          dynamic array / slice
+    T[N]         fixed-size array (N is a comptime constant)
+    (A, B, C)    tuple
+    T?           optional (value or null)
+    T*           raw pointer (unsafe to dereference)
+    &T           shared reference
+    &mut T       exclusive mutable reference
+    Box<T>       owned heap pointer
+    Result<T,E>  success or error
+    func(A,B) -> R    function type
+    map<K,V>     hash map
+
+  Type aliases:
+    type Meters = float
+    type Callback = func(int) -> void
+
+  Rules:
+    - No implicit numeric conversion. Use `x as float`.
+    - null exists only for optional types T?. A plain T is never null.
+    - Type inference works for local variables; function signatures must be
+      fully annotated.
+
+2.3 Declarations
+
+  let x = 10             immutable binding (cannot be reassigned)
+  var y = 10             mutable binding
+  const MAX: int = 100   compile-time constant (type required)
+  static var counter: int = 0     global mutable (access requires unsafe
+                                   unless wrapped in Mutex)
+  const TABLE: int = comptime fib(10)
+
+  Destructuring:
+    let (a, b) = pair
+    let Point { x, y } = p
+
+2.4 Functions
+
+  func add(a: int, b: int) -> int {
+      return a + b
+  }
+
+  func square(x: int) -> int => x * x            expression body
+
+  func greet(name: string = "world") -> void     default parameter
+  func sum(nums: int...) -> int                  variadic
+  greet(name: "ag")                              named argument at call site
+  sum(...list)                                   spread
+
+  Attributes:
+    @inline
+    @deprecated("use add instead")
+    @extern_name("c_symbol")
+
+  Closures:
+    let f = (n: int) -> int => n + 1
+    let g = n => n * 2                    parameter types inferred
+    let h = move () -> int { n += 1; return n }   captures by move
+
+  Closure parameter and return types may be omitted when inferable.
+
+2.5 Control flow
+
+  if cond { } else if cond { } else { }          parentheses optional
+  while cond { }
+  until cond { }                                 sugar for while !cond
+  loop { break value }                           infinite loop, break with value
+  for x in collection { }
+  for i, x in collection { }                     index + element
+  for i in 0..10 { }                             exclusive range
+  for i in 0..=10 { }                            inclusive range
+  for i in 0..100 step 5 { }
+  outer: for ... { break outer }                 labeled break/continue
+  guard cond else { return }                     early exit, else block must
+                                                 diverge (return/break/etc.)
+  defer expr                                     runs at scope exit, LIFO
+  with let f = open(path) { ... }                scoped resource, auto close
+
+  Conditional binding:
+    if status is Status.Error(msg) { }
+    while let Some(x) = stack.pop() { }
+    let n = parse(text) orelse return Err("bad")
+
+  Ternary: cond ? a : b
+
+2.6 Pattern matching
+
+  match value {
+      0 => "zero",
+      1..=9 => "small",
+      n @ 10..=99 if n % 2 == 0 => "even tens",
+      100 | 200 | 300 => "round",
+      Status.Error(msg) => msg,
+      Status.Moved { x, y } => f"{x},{y}",
+      (a, b) => ...,
+      _ => "other",
+  }
+
+  - Match is an expression and must be exhaustive (compile error otherwise).
+  - Guards use `if`.
+  - Bindings use `name @ pattern`.
+  - Or-patterns use `|` only inside pattern position.
+
+2.7 Structs, enums, protocols, extensions
+
+  struct Point { pub x: int, pub y: int }
+
+  extension Point {                    inherent methods
+      func origin() -> Self => Point { x: 0, y: 0 }
+      func dist(self) -> float { ... }
+      func shift(mut self, dx: int, dy: int) -> void { ... }
+      func moved(self, dx: int) -> Self => self.copy(x: self.x + dx)
+  }
+
+  enum Status {
+      Ok,
+      Error(string),
+      Pending(int),
+      Moved { x: int, y: int },
+  }
+
+  protocol Shape {
+      func area(self) -> float                       required
+      func describe(self) -> string => f"area = {self.area():.2}"   default
+  }
+
+  extension Circle: Shape {                          conformance
+      func area(self) -> float => m.PI * self.r ** 2
+  }
+
+  Dynamic dispatch:   let shapes: Box<Shape>[] = [box Circle { r: 1.0 }]
+  Static dispatch:    func total<T: Shape>(items: T[])
+
+  Operator overloading:
+    operator (l: Vec2) + (r: Vec2) -> Vec2 => ...
+    operator (v: Vec2) [] (i: int) -> float => ...
+
+2.8 Generics
+
+  struct Stack<T> { items: T[] }
+  struct Ring<T, const N: int> { data: T[N], head: int }
+
+  func max<T: Ord>(a: T, b: T) -> T => a > b ? a : b
+  func largest<T>(items: T[]) -> T? where T: Ord + Copy { ... }
+
+  - Inline bounds for simple cases, `where` for multiple/complex bounds.
+  - Monomorphization (one compiled copy per concrete type).
+  - Explicit type arguments in expressions: Stack<int>.new(), max<int>(1, 2)
+
+2.9 Error handling
+
+  - No exceptions. Failure is a value: Result<T, E>.
+  - Option is written T? and uses null.
+
+  func divide(a: int, b: int) -> Result<int, string> {
+      if b == 0 { return Err("divide by zero") }
+      return Ok(a / b)
+  }
+
+  let v = try divide(a, b)         propagate Err to caller (like Zig/Swift)
+  let v = divide(a, b)!            force unwrap, panics on Err/null
+  let v = maybe ?? 0               default if null
+  let c = user?.address?.city ?? "unknown"
+  maybe ??= 42                     assign only if null
+
+  `try` is only valid inside a function whose return type is Result with a
+  compatible error type (or convertible via From protocol).
+
+2.10 Memory model
+
+  - Every value has exactly one owner. Assignment and passing MOVE by default
+    for non-Copy types. Types marked Copy (ints, floats, bool, char, small
+    structs marked @copy) are duplicated.
+  - Borrowing:
+        let r: &int = &n            shared, many allowed
+        let w: &mut int = &mut n    exclusive, only one at a time
+    Rule: either many &T or one &mut T, never both, at the same time.
+  - Lifetimes are inferred (lexical, scope-based) in v1. No lifetime
+    annotations in the surface syntax initially.
+  - Heap: Box<T>, alloc<T>(n) / free(p) for manual control.
+  - defer free(buf) is the idiomatic cleanup.
+  - unsafe { } allows raw pointer deref, pointer arithmetic, calling extern
+    functions, and accessing static var.
+
+2.11 Concurrency
+
+  spawn { ... }                         lightweight task
+  let ch = Channel<int>.new(8)          buffered channel
+  ch <- value                           send
+  let v = <-ch                          receive (null when closed)
+  while let Some(job) = <-ch { }
+  select {                              wait on several channels
+      v = <-a => ...,
+      w = <-b => ...,
+  }
+  Mutex<T>.with(closure)                scoped lock access
+  async func / await                    for IO-bound futures
+
+  Data-race freedom in safe code: values sent through channels are MOVED,
+  shared state must go through Mutex or atomics.
+
+2.12 Compile-time execution
+
+  comptime func fib(n: int) -> int { ... }
+  const TABLE: int = comptime fib(10)
+
+  - comptime functions run inside the compiler (an interpreter over the typed
+    IR). They may not do IO or touch static state.
+  - Used for constants, array sizes, and generic const parameters.
+
+2.13 Modules and imports
+
+  import ag.io.{println, readln, eprintln}
+  import ag.math as m
+  import ag.mem.{alloc, free}
+  import ag.fs
+
+  mod geometry {
+      pub const ORIGIN: int = 0
+      pub func unit() -> float => 1.0
+  }
+
+  - Items are private by default; `pub` exports them.
+  - One file = one module; directory with mod.ag = package.
+  - Path separator is `.` everywhere (no `::`).
+
+2.14 FFI
+
+  extern "c" {
+      func strlen(text: char*) -> int
+      func stoi(text: char*) -> int
+  }
+  - Calls to extern functions require unsafe.
+  - Struct layout control: @repr(c).
+
+2.15 Testing
+
+  test "add works" {
+      assert(add(2, 3) == 5)
+      assert(add(-1, 1) == 0, "should cancel out")
+  }
+  - `agc test` builds and runs all test blocks.
+
+2.16 Operator precedence (highest to lowest)
+
+   1  postfix:  . ?. () [] ! as
+   2  prefix:   - ! ~ & &mut * <- try await box
+   3  **        (right-associative)
+   4  * / %
+   5  + -
+   6  << >>
+   7  &
+   8  ^
+   9  |
+  10  ..  ..=   (non-associative)
+  11  == != < <= > >= in is   (non-associative)
+  12  &&
+  13  ||
+  14  ??        (right-associative)
+  15  |>        (left-associative)
+  16  ? :       (right-associative)
+  17  = += -= ... ??=    (right-associative)
+
+  Note: bitwise operators bind tighter than comparison (Rust/Go style, unlike
+  C), so `flags & MASK == 0` means `(flags & MASK) == 0`.
+
+
+--------------------------------------------------------------------------------
+PART 3. KNOWN AMBIGUITIES AND HOW THEY ARE RESOLVED
+--------------------------------------------------------------------------------
+
+  1. Generics vs. comparison:  a < b > (c)
+     Rule: in expression position, `Ident <` is treated as a generic argument
+     list only if the parser can read a valid type list followed by `>` and
+     the next token is `(`, `.`, or `{`. Otherwise it is a comparison. The
+     parser speculates and backtracks (bounded, one level).
+
+  2. `?` has three roles:  T?  /  a?.b  /  a ? b : c
+     Rule: type context -> optional suffix. Immediately followed by `.` ->
+     optional chaining. Expression context with `:` to follow -> ternary.
+     Error propagation uses `try`, so `?` is never propagation.
+
+  3. `|` has two roles: bitwise OR and pattern alternation.
+     Rule: parser mode. Inside match arms and `is` patterns it is alternation.
+     Elsewhere it is bitwise OR. `|>` is a separate token (longest match).
+
+  4. `<-` vs. `x < -1`
+     Rule: `<-` is always lexed as one token (longest match). Write `x < -1`
+     with a space to mean less-than negative one.
+
+  5. Struct literal vs. block:  if x == Point { ... }
+     Rule: in the condition of if/while/for/match, struct literals are not
+     allowed unless wrapped in parentheses (Rust rule).
+
+  6. Newline statement termination vs. continuation
+     Rule: see 2.1. A leading `.` or `|>` always continues the previous line.
+
+  7. Closure vs. parenthesized expression:  (a, b) => ...
+     Rule: after `)` if next token is `=>` or `->`, it was a parameter list.
+     Parser looks ahead past the matching `)`.
+
+  8. `..` as range vs. struct spread
+     Rule: struct update is `.copy(...)`, so `..` only means range.
+     `...` is only variadic declaration or spread argument.
+
+  9. `in` as operator vs. for-loop keyword
+     Rule: in `for x in expr`, `in` belongs to the loop. The iterated
+     expression is parsed with `in` disabled as a binary operator.
+
+
+--------------------------------------------------------------------------------
+PART 4. COMPILER ARCHITECTURE
+--------------------------------------------------------------------------------
+
+4.1 Pipeline
+
+  source.ag
+     |
+     v
+  [1] Lexer                 characters -> tokens (with newline/semicolon rule)
+     |
+     v
+  [2] Parser                tokens -> AST (recursive descent + Pratt for
+     |                      expressions)
+     v
+  [3] Name resolution       imports, modules, scopes, symbol table
+     |
+     v
+  [4] Type checker          inference, generics, protocol conformance,
+     |                      exhaustive match checking
+     v
+  [5] Comptime evaluator    runs comptime functions, folds constants
+     |
+     v
+  [6] Lowering to MIR       desugar: for/until/with/defer/pipeline/f-strings/
+     |                      match -> control-flow graph
+     v
+  [7] Ownership/borrow pass move checking, borrow rules, definite assignment
+     |
+     v
+  [8] Monomorphization      instantiate generics
+     |
+     v
+  [9] Optimizer             const fold, dead code, inline @inline
+     |
+     v
+  [10] Backend              C backend first, then LLVM (or QBE)
+     |
+     v
+  executable / library
+
+4.2 Components
+
+  Source manager      file ids, spans, line/column mapping
+  Diagnostics         error codes (E0001...), spans, notes, suggestions
+  Interner            string interning for identifiers
+  AST                 arena-allocated nodes with spans
+  HIR / typed AST     after type check
+  MIR                 CFG with explicit drops, moves, borrows
+  Runtime library     minimal: panic, allocator hooks, channel/task scheduler
+
+4.3 Implementation language
+
+  Recommended: Rust or Zig (good for compilers, strong enums/pattern matching
+  for AST). C is possible but slower to develop. Bootstrapping ag in itself
+  (self-hosting) is a long-term milestone, not a starting point.
+
+4.4 Backend strategy
+
+  Phase A: emit C and call a system C compiler (gcc/clang). Fastest way to a
+           working compiler, great portability, easy debugging.
+  Phase B: LLVM backend for real optimization and direct object output.
+  Optional: QBE backend for a small, simple alternative.
+
+4.5 Desugaring table
+
+  until c { }                   -> while !c { }
+  for i in a..b { }             -> iterator loop over Range
+  for i in 0..100 step 5        -> Range with step
+  x |> f(y)                     -> f(x, y)
+  a ?? b                        -> match a { null => b, v => v }
+  a ??= b                       -> if a == null { a = b }
+  a?.b                          -> match a { null => null, v => v.b }
+  try e                         -> match e { Ok(v) => v, Err(x) => return Err(x) }
+  guard c else { B }            -> if !c { B }   (B must diverge)
+  defer e                       -> push e to scope-exit list, emitted on every
+                                   exit path in reverse order
+  with let f = e { B }          -> let f = e; defer f.close(); B
+  f"x {a:>6}"                   -> string builder calls
+  e orelse B                    -> match e { null => B, v => v }
+  p.copy(x: v)                  -> struct literal copying remaining fields
+  while let P = e { B }         -> loop { match e { P => B, _ => break } }
+  select { ... }                -> runtime channel poll call
+
+
+--------------------------------------------------------------------------------
+PART 5. STANDARD LIBRARY PLAN
+--------------------------------------------------------------------------------
+
+  ag.io       println, print, readln, eprintln, Reader/Writer protocols
+  ag.fs       open, read_all, write, paths
+  ag.math     sqrt, pow, sin/cos, PI, E, min/max
+  ag.mem      alloc, free, copy, Box helpers
+  ag.sync     Channel, Mutex, Atomic, WaitGroup
+  ag.string   string methods, StringBuilder
+  ag.collections   Vec/array methods, map, Set, Deque
+  ag.iter     map, filter, fold, zip, enumerate, collect
+  ag.http     (later) simple client, built on async
+  ag.test     assert, assert_eq
+
+  Core protocols: Ord, Eq, Copy, Clone, Display, Default, From, Iterator,
+  Drop, Hash.
+
+
+--------------------------------------------------------------------------------
+PART 6. TOOLING PLAN
+--------------------------------------------------------------------------------
+
+  agc build file.ag       compile
+  agc run file.ag         compile and run
+  agc test                run test blocks
+  agc fmt                 formatter (one canonical style)
+  agc check               type-check only, fast
+  ag-lsp                  language server (completion, diagnostics, hover)
+  Editor support          TextMate/tree-sitter grammar for highlighting
+  Package manager         ag.toml manifest, `agpkg add name` (late stage)
+
+
+--------------------------------------------------------------------------------
+PART 7. ROADMAP
+--------------------------------------------------------------------------------
+
+  Milestone 0  Spec freeze (2-3 weeks)
+    - Finalize this document; resolve open questions in Part 8.
+    - Write a formal EBNF grammar.
+    - Write 20 example programs as a conformance suite.
+
+  Milestone 1  Lexer + parser (4-6 weeks)
+    - Tokens, newline rule, f-string tokenization.
+    - Full AST for everything in Part 2.
+    - AST pretty-printer and parser tests (golden files).
+    - Good syntax error messages with spans.
+
+  Milestone 2  Minimal compiler, "hello world" to C (4-6 weeks)
+    - Name resolution, basic types, functions, let/var, if/while/for,
+      structs, println via C printf.
+    - C backend.
+    - Compile and run fib, fizzbuzz, sorting.
+
+  Milestone 3  Type system (6-8 weeks)
+    - Inference, optional types, enums, match + exhaustiveness.
+    - Protocols, extensions, generics with monomorphization.
+    - Closures, Result, try, ?? and ?.
+
+  Milestone 4  Memory safety (6-8 weeks)
+    - Move checking, borrow checking (lexical), defer, Box, drop.
+    - unsafe, pointers, extern "c".
+
+  Milestone 5  Compile-time + tooling (4-6 weeks)
+    - comptime interpreter, const generics.
+    - agc fmt, agc test, test blocks.
+
+  Milestone 6  Concurrency (4-6 weeks)
+    - Task scheduler, Channel, Mutex, spawn, select, async/await.
+
+  Milestone 7  Standard library + LLVM backend + LSP (ongoing)
+
+  Milestone 8  Self-hosting (long term)
+    - Rewrite agc in ag, compile it with the previous agc.
+
+  Rough total to a usable v1: 8-12 months solo, part-time.
+
+
+--------------------------------------------------------------------------------
+PART 8. OPEN DESIGN QUESTIONS
+--------------------------------------------------------------------------------
+
+  1. Keep semicolons optional, or require them (simpler lexer)?
+  2. protocol vs. trait vs. interface: choose exactly one keyword.
+     (Plan assumes `protocol`, with `extension` for impls.)
+  3. Do we want explicit lifetime annotations later, or stay with inferred
+     scope-based borrowing?
+  4. Green-thread scheduler (Go-like) or OS threads for spawn?
+  5. How are Option and null unified: is `T?` sugar for Option<T>, or a
+     separate nullable type? (Plan assumes nullable with null.)
+  6. Should integer overflow panic in debug and wrap in release (Rust), or
+     always be defined (Zig style, explicit +% operators)?
+  7. Error type conversion: implicit via From protocol on `try`, or explicit?
+  8. Generic syntax: keep `<T>` (needs the ambiguity rule in Part 3) or use
+     `[T]` (Scala/Go, no ambiguity but conflicts with indexing)?
+  9. Is `box` a keyword or a function Box.new(x)?
+  10. Name and file extension: `ag` / `.ag` is a placeholder.
+
+
+--------------------------------------------------------------------------------
+PART 9. SAMPLE PROGRAM (REFERENCE)
+--------------------------------------------------------------------------------
+
+  import ag.io.{println}
+
+  protocol Shape {
+      func area(self) -> float
+      func describe(self) -> string => f"area = {self.area():.2}"
+  }
+
+  struct Circle { r: float }
+
+  extension Circle: Shape {
+      func area(self) -> float => 3.14159 * self.r ** 2
+  }
+
+  func divide(a: int, b: int) -> Result<int, string> {
+      guard b != 0 else { return Err("divide by zero") }
+      return Ok(a / b)
+  }
+
+  func run() -> Result<void, string> {
+      let v = try divide(10, 2)
+      println(f"result = {v}")
+      return Ok(())
+  }
+
+  func main() -> int {
+      let c = Circle { r: 2.0 }
+      println(c.describe())
+
+      let nums = [1, 2, 3, 4, 5, 6]
+      let total = nums
+          |> filter(n => n % 2 == 0)
+          |> map(n => n * n)
+          |> sum_all()
+      println(total)
+
+      let jobs = Channel<int>.new(8)
+      spawn {
+          for i in 0..5 { jobs <- i }
+          jobs.close()
+      }
+      while let Some(job) = <-jobs { println(job) }
+
+      match run() {
+          Ok(_) => println("done"),
+          Err(e) => println(e),
+      }
+      return 0
+  }
+
+
+--------------------------------------------------------------------------------
+PART 10. NEXT STEPS
+--------------------------------------------------------------------------------
+
+  1. Answer the open questions in Part 8.
+  2. Write the formal EBNF grammar (grammar.ebnf).
+  3. Choose the compiler implementation language.
+  4. Build the lexer, then the parser, using the example programs as tests.
+  5. Get "hello world" compiling to C before adding anything else.
+
+================================================================================
+                                 END OF PLAN
+================================================================================

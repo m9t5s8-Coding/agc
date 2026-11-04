@@ -22,11 +22,13 @@ StructStatement::ParseStruct(Parser& parser) {
   auto struct_stmt        = AG_cscope<StructStatement>();
   struct_stmt->m_location = {struct_token.line, struct_token.column};
 
+  std::string raw_name;
   AG_EXPECT_GET_ID_OR_RETURN(parser,
                              error::ExpectedStructName,
-                             struct_stmt->m_definition.name,
+                             raw_name,
                              nullptr,
                              TokenName::AG_IDENTIFIER);
+  struct_stmt->m_definition.name     = parser.qualify_name(raw_name);
   struct_stmt->m_definition.location = struct_stmt->m_location;
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_BRACE, error::ExpectedLeftBrace, nullptr);

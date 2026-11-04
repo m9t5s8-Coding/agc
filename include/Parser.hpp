@@ -292,11 +292,71 @@ public:
     return m_impl_types.empty() ? empty : m_impl_types.back();
   }
 
+  // The parser is inside a `mod name { ... }` block while its declarations
+  // are parsed.  Declarations are stored under a qualified source name so
+  // different modules may reuse the same function or type name.
+  void
+  push_module_path(std::string path) {
+    m_module_paths.push_back(std::move(path));
+  }
+
+  void
+  pop_module_path() {
+    if (!m_module_paths.empty())
+      m_module_paths.pop_back();
+  }
+
+  const std::string&
+  current_module_path() const {
+    static const std::string empty;
+    return m_module_paths.empty() ? empty : m_module_paths.back();
+  }
+
+  std::string
+  qualify_name(std::string_view name) const {
+    if (current_module_path().empty())
+      return std::string(name);
+    return current_module_path() + "::" + std::string(name);
+  }
+
+  // Resolve an unqualified or module-qualified source name through the import
+  // bindings of the active module.  Function calls and type references both
+  // use this path so `math::sqrt`, `m::sqrt`, and `import math { sqrt }`
+  // spellings all resolve to the same declaration.
+  std::string
+  resolve_symbol_name(std::string_view name) const;
+
+  std::string
+  resolve_type_name(std::string_view name) const;
+
   // Parser-owned storage for synthesized names such as `operator+`.
   std::string_view
   intern_operator_name(const std::string& name) {
     m_operator_names.push_back(name);
     return m_operator_names.back();
+  }
+
+  std::string_view
+  intern_name(const std::string& name) {
+    m_operator_names.push_back(name);
+    return m_operator_names.back();
+  }
+
+  // Parse the top-level statements of a module file using this parser's
+  // tables and diagnostics.  The caller owns the lexer and its source text so
+  // token views remain valid after the parser state is restored.
+  void
+  parse_module_tokens(Lexer&                             lexer,
+                      std::string                        module_path,
+                      std::vector<AG_scope<Statements>>& statements);
+
+  // Module statements temporarily make their own lexer active while their
+  // bodies are analyzed or lowered so diagnostics point at the module source.
+  Lexer*
+  swap_lexer(Lexer* lexer) {
+    Lexer* previous = m_lexer;
+    m_lexer         = lexer;
+    return previous;
   }
 
   void
@@ -334,6 +394,7 @@ private:
   std::vector<DataType> m_function_return_types;
   std::vector<std::string> m_active_operators;
   std::vector<std::string> m_impl_types;
+  std::vector<std::string> m_module_paths;
   std::deque<std::string>  m_operator_names;
 
   std::vector<AG_scope<Statements>>   m_statements;

@@ -1,6 +1,7 @@
 #include "Statements/function.hpp"
 
 #include "Statements/Statements.hpp"
+#include "Statements/return.hpp"
 #include "IR/IR.hpp"
 #include "IR/IRTable.hpp"
 #include "Statements/Utils.hpp"
@@ -41,7 +42,7 @@ parse_function_parameter(Parser& parser) {
       }
 
       param.name = "self";
-      param.type = make_struct_type(parser.current_impl_type());
+      param.type = make_named_type(parser.current_impl_type());
       param.type.is_const = !is_mut;
       parser.advance();
     } else {
@@ -61,7 +62,7 @@ parse_function_parameter(Parser& parser) {
 
       if (type->primitive_type == PrimitiveType::USER_DEFINED && type->type_name == "Self" &&
           !parser.current_impl_type().empty()) {
-        *type = make_struct_type(parser.current_impl_type());
+        *type = make_named_type(parser.current_impl_type());
       }
 
       param.type = std::move(*type);
@@ -92,7 +93,7 @@ parse_return_type(Parser& parser) {
   // `Self` inside an impl block is the enclosing struct type.
   if (type->primitive_type == PrimitiveType::USER_DEFINED && type->type_name == "Self" &&
       !parser.current_impl_type().empty()) {
-    *type = make_struct_type(parser.current_impl_type());
+    *type = make_named_type(parser.current_impl_type());
   }
 
   return type;
@@ -169,6 +170,32 @@ mangle_operator_symbol(const std::string_view symbol) {
   return mangled;
 }
 
+namespace {
+std::string
+mangle_label_component(std::string_view name) {
+  std::string result;
+  result.reserve(name.size());
+  for (size_t i = 0; i < name.size(); ++i) {
+    if (name[i] == ':' && i + 1 < name.size() && name[i + 1] == ':') {
+      result.push_back('$');
+      ++i;
+    } else {
+      result.push_back(name[i]);
+    }
+  }
+  return result;
+}
+} // namespace
+
+std::string
+FunctionStatement::source_name() const {
+  if (!m_owner_type.empty())
+    return m_owner_type + "." + m_function_name;
+  if (!m_module_path.empty())
+    return m_module_path + "::" + m_function_name;
+  return m_function_name;
+}
+
 std::string
 FunctionStatement::function_label() const {
   std::string label;
@@ -181,9 +208,12 @@ FunctionStatement::function_label() const {
   }
 
   // Methods live in the struct's namespace so two types may define methods
-  // with the same source name and signature.
+  // with the same source name and signature.  The owner type is already
+  // module-qualified, so it also carries the module label prefix.
   if (!m_owner_type.empty())
-    label = m_owner_type + "$" + label;
+    label = mangle_label_component(m_owner_type) + "$" + label;
+  else if (!m_module_path.empty())
+    label = mangle_label_component(m_module_path) + "$" + label;
   return label;
 }
 
@@ -195,7 +225,8 @@ FunctionStatement::ParseFunction(Parser& parser) {
   TokenName   temp_token;
   const Token function_token = parser.current_token();
 
-  function_stmt->m_owner_type = parser.current_impl_type();
+  function_stmt->m_owner_type  = parser.current_impl_type();
+  function_stmt->m_module_path = parser.current_module_path();
 
   AG_EXPECT_GET_ID_OR_RETURN(
       parser, ag::error::ExpectedFunctionName, function_stmt->m_function_name, nullptr, TokenName::AG_IDENTIFIER);
@@ -223,7 +254,8 @@ FunctionStatement::ParseFunction(Parser& parser) {
                                 &temp_token,
                                 nullptr,
                                 TokenName::AG_LEFT_BRACE,
-                                TokenName::AG_SEMICOLON);
+                                TokenName::AG_SEMICOLON,
+                                TokenName::AG_FAT_ARROW);
     }
 
     function_stmt->is_declaration = (temp_token == TokenName::AG_SEMICOLON);
@@ -239,6 +271,13 @@ FunctionStatement::ParseFunction(Parser& parser) {
       return function_stmt;
     } else if (temp_token == TokenName::AG_LEFT_BRACE) {
       AG_PARSE_SCOPE(parser, function_stmt->m_function_body, nullptr);
+    } else if (temp_token == TokenName::AG_FAT_ARROW) {
+      parser.advance();
+      AG_scope<Expression> expression;
+      AG_PARSE_EXPRESSION_OR_RETURN(parser, expression, nullptr);
+      AG_EXPECT_OR_RETURN(parser, TokenName::AG_SEMICOLON, error::ExpectedSemicolon, nullptr);
+      function_stmt->m_function_body
+          = ReturnStatement::Create(std::move(expression), function_stmt->m_location);
     }
   }
   return function_stmt;
@@ -252,6 +291,7 @@ FunctionStatement::ParseOperator(Parser& parser) {
   auto function_stmt           = AG_cscope<FunctionStatement>();
   function_stmt->m_location    = {operator_token.line, operator_token.column};
   function_stmt->m_is_operator = true;
+  function_stmt->m_module_path = parser.current_module_path();
 
   std::string                   symbol;
   std::vector<FunctionParameter> parameters;
@@ -322,7 +362,8 @@ FunctionStatement::ParseOperator(Parser& parser) {
                               &temp_token,
                               nullptr,
                               TokenName::AG_LEFT_BRACE,
-                              TokenName::AG_SEMICOLON);
+                              TokenName::AG_SEMICOLON,
+                              TokenName::AG_FAT_ARROW);
   }
 
   function_stmt->is_declaration = (temp_token == TokenName::AG_SEMICOLON);
@@ -335,8 +376,16 @@ FunctionStatement::ParseOperator(Parser& parser) {
     return function_stmt;
   }
 
-  if (temp_token == TokenName::AG_LEFT_BRACE)
+  if (temp_token == TokenName::AG_LEFT_BRACE) {
     AG_PARSE_SCOPE(parser, function_stmt->m_function_body, nullptr);
+  } else if (temp_token == TokenName::AG_FAT_ARROW) {
+    parser.advance();
+    AG_scope<Expression> expression;
+    AG_PARSE_EXPRESSION_OR_RETURN(parser, expression, nullptr);
+    AG_EXPECT_OR_RETURN(parser, TokenName::AG_SEMICOLON, error::ExpectedSemicolon, nullptr);
+    function_stmt->m_function_body
+        = ReturnStatement::Create(std::move(expression), function_stmt->m_location);
+  }
 
   return function_stmt;
 }
@@ -344,7 +393,7 @@ FunctionStatement::ParseOperator(Parser& parser) {
 bool
 FunctionStatement::register_function(Parser& parser) {
   FunctionEntry entry;
-  entry.name        = m_owner_type.empty() ? m_function_name : m_owner_type + "." + m_function_name;
+  entry.name        = source_name();
   entry.label       = function_label();
   entry.return_type = std::make_shared<DataType>(m_return_type);
   entry.parameters  = m_parameters;
@@ -396,7 +445,7 @@ FunctionStatement::generate_ir(LabelCounters& counter,
 
   const std::string function_label = this->function_label();
 
-  counter.function_index = get_ir_table().insert(m_function_name, function_label);
+  counter.function_index = get_ir_table().insert(source_name(), function_label);
 
   // Parameters are passed in registers, but the function body treats every
   // name uniformly: give each parameter a stack slot and let the prologue

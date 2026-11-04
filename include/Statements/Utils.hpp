@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -143,6 +144,80 @@ private:
   std::unordered_map<std::string, StructDefinition> m_structs;
 };
 
+// Translation-unit-wide import bindings.  Bindings are grouped by the module
+// that wrote the import so a module can keep its own aliases without leaking
+// them into unrelated scopes.  The empty scope is the file's top level.
+class ModuleTable {
+public:
+  void
+  declare_module(std::string path) {
+    if (!path.empty())
+      m_modules.insert(std::move(path));
+  }
+
+  bool
+  has_module(std::string_view path) const {
+    return m_modules.contains(std::string(path));
+  }
+
+  void
+  add_module_alias(std::string_view scope,
+                   std::string      alias,
+                   std::string      target) {
+    if (alias.empty() || target.empty())
+      return;
+    m_scopes[std::string(scope)].module_aliases[std::move(alias)] = std::move(target);
+  }
+
+  void
+  add_symbol_alias(std::string_view scope,
+                   std::string      name,
+                   std::string      target) {
+    if (name.empty() || target.empty())
+      return;
+    m_scopes[std::string(scope)].symbol_aliases[std::move(name)] = std::move(target);
+  }
+
+  const std::string*
+  find_module_alias(std::string_view scope,
+                    std::string_view alias) const {
+    const auto scope_it = m_scopes.find(std::string(scope));
+    if (scope_it == m_scopes.end())
+      return nullptr;
+    const auto alias_it = scope_it->second.module_aliases.find(std::string(alias));
+    return alias_it == scope_it->second.module_aliases.end() ? nullptr : &alias_it->second;
+  }
+
+  const std::string*
+  find_symbol_alias(std::string_view scope,
+                    std::string_view name) const {
+    const auto scope_it = m_scopes.find(std::string(scope));
+    if (scope_it == m_scopes.end())
+      return nullptr;
+    const auto alias_it = scope_it->second.symbol_aliases.find(std::string(name));
+    return alias_it == scope_it->second.symbol_aliases.end() ? nullptr : &alias_it->second;
+  }
+
+  void
+  reset() {
+    m_scopes.clear();
+    m_modules.clear();
+  }
+
+private:
+  struct ScopeAliases {
+    std::unordered_map<std::string, std::string> module_aliases;
+    std::unordered_map<std::string, std::string> symbol_aliases;
+  };
+
+  std::unordered_map<std::string, ScopeAliases> m_scopes;
+  std::unordered_set<std::string>               m_modules;
+};
+
+[[nodiscard]]
+ModuleTable&
+get_module_table();
+
 [[nodiscard]]
 StructTable&
 get_struct_table();
@@ -153,18 +228,86 @@ get_struct_table();
 DataType
 make_struct_type(std::string_view name);
 
-struct EnumConstant {
+struct EnumField {
   std::string    name;
-  int64_t        value = 0;
+  DataType       type;
+  size_t         byte_offset = 0;
   SourceLocation location;
 };
 
+struct EnumVariant {
+  std::string            name;
+  std::vector<EnumField> fields;
+  size_t                 index = 0;
+  SourceLocation         location;
+
+  const EnumField*
+  find_field(std::string_view field_name) const {
+    for (const auto& field : fields) {
+      if (field.name == field_name)
+        return &field;
+    }
+    return nullptr;
+  }
+};
+
+// An enum value is represented by a pointer to heap storage.  The first
+// machine word holds the variant index; payload fields start at byte offset 8
+// and use the same pointer-sized slot layout as structs.
 struct EnumDefinition {
   std::string               name;
-  PrimitiveType             underlying_type = PrimitiveType::INT;
-  std::vector<EnumConstant> constants;
+  std::vector<EnumVariant>  variants;
+  size_t                    size_in_bytes = 8;
+  size_t                    alignment     = 8;
   SourceLocation            location;
+
+  const EnumVariant*
+  find_variant(std::string_view variant_name) const {
+    for (const auto& variant : variants) {
+      if (variant.name == variant_name)
+        return &variant;
+    }
+    return nullptr;
+  }
 };
+
+class EnumTable {
+public:
+  bool
+  declare(EnumDefinition definition) {
+    if (definition.name.empty() || m_enums.contains(definition.name))
+      return false;
+
+    m_enums.emplace(definition.name, std::move(definition));
+    return true;
+  }
+
+  const EnumDefinition*
+  lookup(std::string_view name) const {
+    auto it = m_enums.find(std::string(name));
+    return it == m_enums.end() ? nullptr : &it->second;
+  }
+
+  void
+  reset() {
+    m_enums.clear();
+  }
+
+private:
+  std::unordered_map<std::string, EnumDefinition> m_enums;
+};
+
+[[nodiscard]]
+EnumTable&
+get_enum_table();
+
+DataType
+make_enum_type(std::string_view name);
+
+// Resolve a source type name to either a struct or enum value type.  Used by
+// `Self`, `self`, and impl blocks, where the kind is not known syntactically.
+DataType
+make_named_type(std::string_view name);
 
 struct Declaration {
   DataType     type;
@@ -220,7 +363,8 @@ inline uint32_t
 get_type_size(const DataType& type) {
   // Struct values are pointers to their storage, so a struct variable occupies
   // one machine word even though the pointee layout may be much larger.
-  if (type.kind == TypeKind::POINTER || type.kind == TypeKind::STRUCT)
+  if (type.kind == TypeKind::POINTER || type.kind == TypeKind::STRUCT ||
+      type.kind == TypeKind::ENUM)
     return 8;
 
   if (type.size_in_bytes != 0)
@@ -366,8 +510,23 @@ mangle_type_name(const DataType& type) {
   if (type.kind == TypeKind::POINTER && type.pointee)
     return mangle_type_name(*type.pointee) + "_ptr";
 
-  if (!type.type_name.empty())
-    return std::string(type.type_name);
+  if (!type.type_name.empty()) {
+    // Module-qualified type names contain `::`, which is not valid in an
+    // assembly label.  Encode the separator while keeping unqualified names
+    // (the common case) byte-for-byte unchanged.
+    std::string name;
+    name.reserve(type.type_name.size());
+    for (size_t i = 0; i < type.type_name.size(); ++i) {
+      if (type.type_name[i] == ':' && i + 1 < type.type_name.size() &&
+          type.type_name[i + 1] == ':') {
+        name.push_back('$');
+        ++i;
+      } else {
+        name.push_back(type.type_name[i]);
+      }
+    }
+    return name;
+  }
 
   switch (type.primitive_type) {
   case PrimitiveType::VOID:

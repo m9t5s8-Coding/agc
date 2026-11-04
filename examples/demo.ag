@@ -1,0 +1,195 @@
+# AGC feature demo
+#
+# This example only uses features that are implemented by the current
+# compiler.  It is intentionally self-contained and non-interactive.
+#
+# Build and run:
+#   build/agc examples/demo.ag -o demo
+#   ./demo
+#
+# The same source also works with the LLVM backend:
+#   build/agc examples/demo.ag --llvm -o demo-llvm
+#   ./demo-llvm
+
+# ---------------------------------------------------------------------------
+# Inline module + import
+# ---------------------------------------------------------------------------
+
+mod mathx {
+    pub func square(value: int) -> int => value * value;
+}
+
+import mathx { square };
+
+# ---------------------------------------------------------------------------
+# Structs, methods, and operator overloading
+# ---------------------------------------------------------------------------
+
+struct Point {
+    x: int,
+    y: int,
+}
+
+impl Point {
+    func moved(self, dx: int, dy: int) -> Point =>
+        Point { x: self.x + dx, y: self.y + dy };
+
+    func sum(self) -> int => self.x + self.y;
+}
+
+operator (left: Point) + (right: Point) -> Point =>
+    Point { x: left.x + right.x, y: left.y + right.y };
+
+# ---------------------------------------------------------------------------
+# Enums with payloads and match expressions
+# ---------------------------------------------------------------------------
+
+enum Status {
+    Ok,
+    Error(string),
+    Pending(int),
+    Moved { x: int, y: int },
+}
+
+impl Status {
+    func is_ok(self) -> bool => match self {
+        Status::Ok => true,
+        _ => false,
+    };
+}
+
+func classify(status: Status) -> int {
+    return match status {
+        Status::Ok => 1,
+        Status::Error(message) => 2,
+        Status::Pending(code) if code > 5 => code,
+        Status::Pending(code) => code + 10,
+        Status::Moved { x, y } => x + y,
+        _ => 0,
+    };
+}
+
+# ---------------------------------------------------------------------------
+# Small output helpers
+# ---------------------------------------------------------------------------
+
+func string_length(text: string) -> int {
+    var length: int = 0;
+    while (text[length] != 0) {
+        length = length + 1;
+    }
+    return length;
+}
+
+func print_text(text: string) -> void {
+    write(text, string_length(text));
+    return;
+}
+
+func print_int(value: int) -> void {
+    var buffer: string = alloc(32);
+    var number: int = value;
+    var length: int = 0;
+    var left: int = 0;
+    var right: int = 0;
+    var temporary: int = 0;
+
+    if (number == 0) {
+        buffer[0] = 48;  # '0'
+        length = 1;
+    }
+
+    while (number > 0) {
+        buffer[length] = 48 + (number % 10);
+        length = length + 1;
+        number = number / 10;
+    }
+
+    left = 0;
+    right = length - 1;
+    while (left < right) {
+        temporary = buffer[left];
+        buffer[left] = buffer[right];
+        buffer[right] = temporary;
+        left = left + 1;
+        right = right - 1;
+    }
+
+    write(buffer, length);
+    free(buffer);
+    return;
+}
+
+func print_line(value: int) -> void {
+    print_int(value);
+    print_text("\n");
+    return;
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+func main() -> int {
+    print_text("AGC demo\n");
+
+    # Struct literals, methods, and overloaded operators.
+    let point: Point = Point { x: 1, y: 2 };
+    let moved: Point = point.moved(3, 4);
+    let combined: Point = point + moved;
+    let point_sum: int = combined.sum();
+
+    # Inline module function imported by name.
+    let squared: int = square(6);
+
+    # Enum construction and matching, including payload bindings and guards.
+    let ok_status: Status = Status::Ok;
+    let error_status: Status = Status::Error("failed");
+    let pending_status: Status = Status::Pending(7);
+    let moved_status: Status = Status::Moved { x: 2, y: 3 };
+
+    let ok_value: int = classify(ok_status);
+    let error_value: int = classify(error_status);
+    let pending_value: int = classify(pending_status);
+    let moved_value: int = classify(moved_status);
+
+    # Enum method call.
+    let is_ok: bool = ok_status.is_ok();
+
+    # A simple while loop.
+    var factorial: int = 1;
+    var index: int = 1;
+    while (index <= 5) {
+        factorial = factorial * index;
+        index = index + 1;
+    }
+
+    print_text("point sum: ");
+    print_line(point_sum);
+    print_text("squared: ");
+    print_line(squared);
+    print_text("status values: ");
+    print_int(ok_value);
+    print_text(" ");
+    print_int(error_value);
+    print_text(" ");
+    print_int(pending_value);
+    print_text(" ");
+    print_line(moved_value);
+    print_text("factorial: ");
+    print_line(factorial);
+
+    if (is_ok) {
+        print_text("status is ok\n");
+    } else {
+        print_text("status is not ok\n");
+    }
+
+    let total: int = point_sum + squared + ok_value + error_value +
+                     pending_value + moved_value + factorial;
+
+    print_text("total: ");
+    print_line(total);
+
+    return total;
+}

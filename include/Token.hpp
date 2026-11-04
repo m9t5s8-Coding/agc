@@ -11,9 +11,14 @@ enum class TokenName {
   AG_FUNC,
   AG_OPERATOR,
   AG_STRUCT,
+  AG_ENUM,
   AG_IMPL,
   AG_PUB,
   AG_MUT,
+  AG_IMPORT,
+  AG_MOD,
+  AG_AS,
+  AG_MATCH,
   AG_IDENTIFIER,
   AG_KEYWORD,
 
@@ -34,6 +39,7 @@ enum class TokenName {
 
   AG_SEMICOLON,
   AG_COLON,
+  AG_DOUBLE_COLON,
   AG_COMMA,
 
   AG_PLUS,
@@ -85,6 +91,7 @@ enum class TokenName {
   AG_LESS_EQUAL,
 
   AG_ARROW,
+  AG_FAT_ARROW,
   AG_QUESTION,
 
   AG_WRITE,

@@ -24,9 +24,16 @@ Lexer::contains(const std::string_view str_view,
       {"func", {TokenName::AG_FUNC}},
       {"operator", {TokenName::AG_OPERATOR}},
       {"struct", {TokenName::AG_STRUCT}},
+      {"enum", {TokenName::AG_ENUM}},
       {"impl", {TokenName::AG_IMPL}},
       {"pub", {TokenName::AG_PUB}},
       {"mut", {TokenName::AG_MUT}},
+      {"import", {TokenName::AG_IMPORT}},
+      {"mod", {TokenName::AG_MOD}},
+      {"as", {TokenName::AG_AS}},
+      {"match", {TokenName::AG_MATCH}},
+      {"true", {TokenName::AG_INT_LITERAL, "1"}},
+      {"false", {TokenName::AG_INT_LITERAL, "0"}},
       {"return", {TokenName::AG_RETURN}},
       {"write", {TokenName::AG_WRITE}},
       {"read", {TokenName::AG_READ}},
@@ -140,7 +147,12 @@ Lexer::scan_char(const char c) {
   }
 
   case ':': {
-    add_token({TokenName::AG_COLON});
+    if (peek() == ':') {
+      increase();
+      add_token({TokenName::AG_DOUBLE_COLON});
+    } else {
+      add_token({TokenName::AG_COLON});
+    }
     return true;
   }
 
@@ -210,6 +222,9 @@ Lexer::scan_char(const char c) {
     if (peek() == '=') {
       increase();
       add_token({TokenName::AG_EQUAL_TO});
+    } else if (peek() == '>') {
+      increase();
+      add_token({TokenName::AG_FAT_ARROW});
     } else {
       add_token({TokenName::AG_ASSIGN});
     }

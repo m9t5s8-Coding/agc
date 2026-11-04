@@ -1,10 +1,13 @@
 #include "Expressions/Expression.hpp"
 #include "IR/Assign.hpp"
 #include "IR/Binary.hpp"
+#include "IR/CondJump.hpp"
 #include "IR/DataItem.hpp"
 #include "IR/FunctionCall.hpp"
 #include "IR/IRTable.hpp"
 #include "IR/IndexAssign.hpp"
+#include "IR/Jump.hpp"
+#include "IR/Label.hpp"
 #include "IR/MemberLoad.hpp"
 #include "IR/MemberStore.hpp"
 #include "IR/Param.hpp"
@@ -252,7 +255,12 @@ resolve_operator_overload(Parser&                          parser,
   OperatorResolution             result;
   std::vector<FunctionEntry>     matches;
 
-  for (const auto& candidate : get_function_table().lookup_all(name)) {
+  const std::string resolved_name = parser.resolve_symbol_name(name);
+  auto              candidates    = get_function_table().lookup_all(resolved_name);
+  if (candidates.empty() && resolved_name != name)
+    candidates = get_function_table().lookup_all(name);
+
+  for (const auto& candidate : candidates) {
     if (!candidate.is_defined)
       continue;
     if (parser.is_operator_context_active(candidate.label))
@@ -306,6 +314,35 @@ unwrap_struct_type(DataType type) {
   if (type.kind == TypeKind::POINTER && type.pointee)
     return *type.pointee;
   return type;
+}
+
+struct ResolvedEnumVariant {
+  const EnumDefinition* definition = nullptr;
+  const EnumVariant*    variant    = nullptr;
+};
+
+std::optional<ResolvedEnumVariant>
+resolve_enum_variant(Parser& parser,
+                     std::string_view path) {
+  const auto separator = path.rfind("::");
+  if (separator == std::string_view::npos)
+    return std::nullopt;
+
+  const std::string enum_part(path.substr(0, separator));
+  const std::string variant_part(path.substr(separator + 2));
+
+  const std::string resolved_enum = parser.resolve_type_name(enum_part);
+  const auto* definition = get_enum_table().lookup(resolved_enum);
+  if (!definition)
+    definition = get_enum_table().lookup(enum_part);
+  if (!definition)
+    return std::nullopt;
+
+  const auto* variant = definition->find_variant(variant_part);
+  if (!variant)
+    return std::nullopt;
+
+  return ResolvedEnumVariant{definition, variant};
 }
 
 Expression*
@@ -462,6 +499,42 @@ Expression::parse_pratt(Parser& parser,
   // Postfix operators bind tighter than every binary operator.  Calls,
   // indexing, and ++/-- are all handled here so they can be chained.
   while (true) {
+    if (parser.check(TokenName::AG_DOUBLE_COLON)) {
+      std::string    first_segment;
+      SourceLocation path_location;
+
+      if (auto* primary = dynamic_cast<PrimaryExpression*>(left.get());
+          primary && primary->primary_type == PrimitiveType::IDENTIFIER) {
+        first_segment = std::string(primary->get_value());
+        path_location = primary->location;
+      } else if (auto* qualified = dynamic_cast<QualifiedNameExpression*>(left.get())) {
+        first_segment = qualified->path;
+        path_location = qualified->location;
+      } else {
+        print_error(error::ExpectedModuleName, parser);
+        return nullptr;
+      }
+
+      left = QualifiedNameExpression::parse(parser, std::move(first_segment), path_location);
+      if (!left)
+        return nullptr;
+
+      // A qualified struct or enum literal, e.g. `geometry::Point { x: 1 }`.
+      // The brace is only consumed when the path actually names a type; this
+      // keeps `match value { ... }` from being mistaken for a literal.
+      if (parser.check(TokenName::AG_LEFT_BRACE)) {
+        auto* qualified = dynamic_cast<QualifiedNameExpression*>(left.get());
+        const std::string resolved_type = parser.resolve_type_name(qualified->path);
+        if (get_struct_table().lookup(resolved_type) ||
+            resolve_enum_variant(parser, qualified->path)) {
+          left = StructLiteralExpression::parse(parser, qualified->path, qualified->location);
+          if (!left)
+            return nullptr;
+        }
+      }
+      continue;
+    }
+
     if (parser.check(TokenName::AG_LEFT_PAREN)) {
       left = CallExpression::parse(parser, std::move(left));
       if (!left)
@@ -532,6 +605,10 @@ Expression::parse_pratt(Parser& parser,
 
 AG_scope<Expression>
 PrimaryExpression::parse_primary(Parser& parser) {
+  if (parser.check(TokenName::AG_MATCH)) {
+    return MatchExpression::parse(parser);
+  }
+
   if (parser.check(TokenName::AG_OPERATOR)) {
     const Token operator_token = parser.current_token();
     parser.advance();
@@ -568,12 +645,19 @@ PrimaryExpression::parse_primary(Parser& parser) {
   parser.advance();
 
   // `Point { x: 3, y: 4 }` is a struct literal.  The identifier has already
-  // been consumed, so the literal parser starts at the opening brace.
+  // been consumed, so the literal parser starts at the opening brace.  Only
+  // consume the brace when the name is a known type so a match scrutinee such
+  // as `match value { ... }` is parsed as an identifier followed by the match
+  // body.
   if (primary_exp->primary_type == PrimitiveType::IDENTIFIER &&
       parser.check(TokenName::AG_LEFT_BRACE)) {
-    return StructLiteralExpression::parse(parser,
-                                          std::string(primary_exp->value),
-                                          primary_exp->location);
+    const std::string resolved_type = parser.resolve_type_name(primary_exp->value);
+    if (get_struct_table().lookup(resolved_type) ||
+        resolve_enum_variant(parser, primary_exp->value)) {
+      return StructLiteralExpression::parse(parser,
+                                            std::string(primary_exp->value),
+                                            primary_exp->location);
+    }
   }
 
   return primary_exp;
@@ -715,30 +799,75 @@ StructLiteralExpression::analyze_semantics(Parser&               parser,
                                            const SourceLocation& location) {
   const auto& diagnostic_location = this->source_location(location);
 
-  const auto* definition = get_struct_table().lookup(type_name);
-  if (!definition) {
+  type_name = parser.resolve_type_name(type_name);
+
+  if (const auto* definition = get_struct_table().lookup(type_name)) {
+    type_name   = definition->name;
+    result_type = make_struct_type(type_name);
+
+    if (spread) {
+      if (!spread->analyze_semantics(parser, spread->source_location(diagnostic_location)))
+        return false;
+
+      const auto spread_type = unwrap_struct_type(spread->get_data_type());
+      if (spread_type.kind != TypeKind::STRUCT || spread_type.type_name != type_name) {
+        print_error(error::IncompatibleTypes, parser, spread->source_location(diagnostic_location));
+        return false;
+      }
+    }
+
+    std::unordered_set<std::string> initialized_fields;
+
+    for (const auto& initializer : fields) {
+      const auto* member = definition->find_member(initializer.name);
+      if (!member) {
+        print_error(error::UndefinedMember, parser, initializer.location);
+        return false;
+      }
+
+      if (!initialized_fields.insert(initializer.name).second) {
+        print_error(error::DuplicateFieldName, parser, initializer.location);
+        return false;
+      }
+
+      if (!initializer.value ||
+          !initializer.value->analyze_semantics(
+              parser, initializer.value->source_location(initializer.location)))
+        return false;
+
+      if (!is_compatible_type(member->type, initializer.value->get_data_type())) {
+        print_error(error::IncompatibleTypes,
+                    parser,
+                    initializer.value->source_location(initializer.location));
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // `Status::Moved { x: 1, y: 2 }` uses the same brace syntax as a struct
+  // literal, but the path names an enum variant rather than a struct.
+  const auto resolved = resolve_enum_variant(parser, type_name);
+  if (!resolved) {
     print_error(error::UndefinedType, parser, diagnostic_location);
     return false;
   }
 
-  result_type = make_struct_type(type_name);
-
   if (spread) {
-    if (!spread->analyze_semantics(parser, spread->source_location(diagnostic_location)))
-      return false;
-
-    const auto spread_type = unwrap_struct_type(spread->get_data_type());
-    if (spread_type.kind != TypeKind::STRUCT || spread_type.type_name != type_name) {
-      print_error(error::IncompatibleTypes, parser, spread->source_location(diagnostic_location));
-      return false;
-    }
+    print_error(error::IncompatibleTypes, parser, spread->source_location(diagnostic_location));
+    return false;
   }
 
-  std::unordered_set<std::string> initialized_fields;
+  m_is_enum_literal = true;
+  m_enum_name       = resolved->definition->name;
+  m_variant_index   = resolved->variant->index;
+  result_type       = make_enum_type(m_enum_name);
 
+  std::unordered_set<std::string> initialized_fields;
   for (const auto& initializer : fields) {
-    const auto* member = definition->find_member(initializer.name);
-    if (!member) {
+    const auto* field = resolved->variant->find_field(initializer.name);
+    if (!field) {
       print_error(error::UndefinedMember, parser, initializer.location);
       return false;
     }
@@ -753,7 +882,7 @@ StructLiteralExpression::analyze_semantics(Parser&               parser,
             parser, initializer.value->source_location(initializer.location)))
       return false;
 
-    if (!is_compatible_type(member->type, initializer.value->get_data_type())) {
+    if (!is_compatible_type(field->type, initializer.value->get_data_type())) {
       print_error(error::IncompatibleTypes,
                   parser,
                   initializer.value->source_location(initializer.location));
@@ -767,6 +896,38 @@ StructLiteralExpression::analyze_semantics(Parser&               parser,
 std::string
 StructLiteralExpression::generate_ir(LabelCounters& counter,
                                      Parser&        parser) {
+  if (m_is_enum_literal) {
+    const auto* definition = get_enum_table().lookup(m_enum_name);
+    if (!definition)
+      return "0";
+
+    parser.add_instructios(AG_cscope<Param>(std::to_string(definition->size_in_bytes),
+                                            counter.function_index));
+    const auto result = make_temp(counter, parser);
+    parser.add_instructios(AG_cscope<FunctionCall>("__ag_alloc", counter.function_index, result));
+    parser.add_instructios(AG_cscope<MemberStore>(result,
+                                                  0,
+                                                  std::to_string(m_variant_index),
+                                                  counter.function_index));
+
+    if (m_variant_index >= definition->variants.size())
+      return result;
+    const auto& variant = definition->variants[m_variant_index];
+
+    for (const auto& initializer : fields) {
+      const auto* field = variant.find_field(initializer.name);
+      if (!field)
+        continue;
+
+      const auto value = initializer.value->generate_ir(counter, parser);
+      parser.add_instructios(AG_cscope<MemberStore>(result,
+                                                    static_cast<uint32_t>(field->byte_offset),
+                                                    value,
+                                                    counter.function_index));
+    }
+    return result;
+  }
+
   const auto* definition = get_struct_table().lookup(type_name);
   if (!definition)
     return "0";
@@ -847,7 +1008,8 @@ CallExpression::analyze_semantics(Parser&               parser,
     const auto receiver_type = unwrap_struct_type(member_callee->object->get_data_type());
     if (receiver_type.primitive_type == PrimitiveType::UNEXPECTED)
       return false;
-    if (receiver_type.kind != TypeKind::STRUCT) {
+    if (receiver_type.kind != TypeKind::STRUCT &&
+        receiver_type.kind != TypeKind::ENUM) {
       print_error(error::InvalidOperandTypes, parser, diagnostic_location);
       return false;
     }
@@ -862,15 +1024,56 @@ CallExpression::analyze_semantics(Parser&               parser,
     m_is_method            = true;
     receiver_argument_type = receiver_type;
   } else {
-    auto* function_name = dynamic_cast<PrimaryExpression*>(callee.get());
-    if (!function_name || function_name->primary_type != PrimitiveType::IDENTIFIER) {
+    std::string function_name;
+
+    if (auto* primary = dynamic_cast<PrimaryExpression*>(callee.get());
+        primary && primary->primary_type == PrimitiveType::IDENTIFIER) {
+      function_name = std::string(primary->get_value());
+    } else if (auto* qualified = dynamic_cast<QualifiedNameExpression*>(callee.get())) {
+      function_name = qualified->path;
+    } else {
       print_error(error::ExpectedFunctionName, parser, diagnostic_location);
       return false;
     }
 
-    candidates = get_function_table().lookup_all(function_name->get_value());
+    const std::string resolved_name = parser.resolve_symbol_name(function_name);
+    candidates                      = get_function_table().lookup_all(resolved_name);
+    if (candidates.empty() && resolved_name != function_name)
+      candidates = get_function_table().lookup_all(function_name);
+
     if (candidates.empty()) {
-      if (auto builtin = make_builtin_entry(function_name->get_value()))
+      if (const auto enum_variant = resolve_enum_variant(parser, function_name)) {
+        m_is_enum_constructor = true;
+        m_enum_name           = enum_variant->definition->name;
+        m_variant_index       = enum_variant->variant->index;
+        m_result_type         = make_enum_type(m_enum_name);
+
+        if (arguments.size() != enum_variant->variant->fields.size()) {
+          print_error(error::InvalidArgumentCount, parser, diagnostic_location);
+          return false;
+        }
+
+        for (size_t i = 0; i < arguments.size(); ++i) {
+          if (!arguments[i]->analyze_semantics(
+                  parser, arguments[i]->source_location(diagnostic_location)))
+            return false;
+          if (!is_compatible_type(enum_variant->variant->fields[i].type,
+                                  arguments[i]->get_data_type())) {
+            print_error(error::InvalidArgumentType,
+                        parser,
+                        arguments[i]->source_location(diagnostic_location));
+            return false;
+          }
+        }
+
+        return true;
+      }
+
+      std::string builtin_name = function_name;
+      if (const auto separator = builtin_name.rfind("::"); separator != std::string::npos)
+        builtin_name = builtin_name.substr(separator + 2);
+
+      if (auto builtin = make_builtin_entry(builtin_name))
         candidates.push_back(std::move(*builtin));
       else {
         print_error(error::UndefinedFunction, parser, diagnostic_location);
@@ -962,6 +1165,39 @@ CallExpression::analyze_semantics(Parser&               parser,
 std::string
 CallExpression::generate_ir(LabelCounters& counter,
                             Parser&        parser) {
+  if (m_is_enum_constructor) {
+    std::vector<std::string> argument_values;
+    argument_values.reserve(arguments.size());
+    for (const auto& argument : arguments)
+      argument_values.push_back(argument->generate_ir(counter, parser));
+
+    const auto* definition = get_enum_table().lookup(m_enum_name);
+    if (!definition)
+      return "0";
+
+    parser.add_instructios(AG_cscope<Param>(std::to_string(definition->size_in_bytes),
+                                            counter.function_index));
+    const auto result = make_temp(counter, parser);
+    parser.add_instructios(AG_cscope<FunctionCall>("__ag_alloc", counter.function_index, result));
+    parser.add_instructios(AG_cscope<MemberStore>(result,
+                                                  0,
+                                                  std::to_string(m_variant_index),
+                                                  counter.function_index));
+
+    if (m_variant_index < definition->variants.size()) {
+      const auto& variant = definition->variants[m_variant_index];
+      for (size_t i = 0; i < argument_values.size() && i < variant.fields.size(); ++i) {
+        parser.add_instructios(AG_cscope<MemberStore>(
+            result,
+            static_cast<uint32_t>(variant.fields[i].byte_offset),
+            argument_values[i],
+            counter.function_index));
+      }
+    }
+
+    return result;
+  }
+
   // Evaluate the receiver (for methods) and every argument first.  A nested
   // call may clobber the argument registers, so the outer call's Param
   // instructions must be emitted only after all evaluation has finished.
@@ -1012,6 +1248,104 @@ PrimaryExpression::get_data_type() {
   DataType type;
   type.primitive_type = primary_type;
   return type;
+}
+
+AG_scope<Expression>
+QualifiedNameExpression::parse(Parser&               parser,
+                               std::string           first_segment,
+                               const SourceLocation& location) {
+  auto expression      = AG_cscope<QualifiedNameExpression>();
+  expression->path     = std::move(first_segment);
+  expression->location = location;
+
+  while (parser.match(TokenName::AG_DOUBLE_COLON)) {
+    if (!parser.check(TokenName::AG_IDENTIFIER)) {
+      print_error(parser.is_at_end() ? error::UnexpectedEndOfFile : error::ExpectedModuleName,
+                  parser);
+      return nullptr;
+    }
+    expression->path += "::";
+    expression->path += parser.current_token().value;
+    parser.advance();
+  }
+
+  return expression;
+}
+
+PrimitiveType
+QualifiedNameExpression::get_type() {
+  return get_data_type().primitive_type;
+}
+
+DataType
+QualifiedNameExpression::get_data_type() {
+  if (m_is_enum_value)
+    return m_result_type;
+
+  const std::string& name = resolved_path.empty() ? path : resolved_path;
+  if (auto data = get_symbol_table().lookup(name))
+    return data->type;
+  if (name != path) {
+    if (auto data = get_symbol_table().lookup(path))
+      return data->type;
+  }
+
+  DataType unknown;
+  unknown.primitive_type = PrimitiveType::UNEXPECTED;
+  return unknown;
+}
+
+bool
+QualifiedNameExpression::analyze_semantics(Parser&               parser,
+                                           const SourceLocation& location) {
+  resolved_path = parser.resolve_symbol_name(path);
+
+  if (get_symbol_table().lookup(resolved_path) ||
+      (resolved_path != path && get_symbol_table().lookup(path)))
+    return true;
+
+  if (const auto resolved = resolve_enum_variant(parser, path)) {
+    if (!resolved->variant->fields.empty()) {
+      print_error(error::InvalidArgumentCount, parser, this->source_location(location));
+      return false;
+    }
+
+    m_is_enum_value  = true;
+    m_enum_name      = resolved->definition->name;
+    m_variant_index  = resolved->variant->index;
+    m_result_type    = make_enum_type(m_enum_name);
+    return true;
+  }
+
+  print_error(error::UseOfUndefined, parser, this->source_location(location));
+  return false;
+}
+
+std::string
+QualifiedNameExpression::generate_ir(LabelCounters& counter,
+                                     Parser&        parser) {
+  if (m_is_enum_value) {
+    const auto* definition = get_enum_table().lookup(m_enum_name);
+    if (!definition)
+      return "0";
+
+    parser.add_instructios(AG_cscope<Param>(std::to_string(definition->size_in_bytes),
+                                            counter.function_index));
+    const auto result = make_temp(counter, parser);
+    parser.add_instructios(AG_cscope<FunctionCall>("__ag_alloc", counter.function_index, result));
+    parser.add_instructios(AG_cscope<MemberStore>(result,
+                                                  0,
+                                                  std::to_string(m_variant_index),
+                                                  counter.function_index));
+    return result;
+  }
+
+  const std::string& name = resolved_path.empty() ? path : resolved_path;
+  if (auto variable = get_ir_table().lookup_source(counter.function_index, name))
+    return variable->name;
+  if (auto global = get_ir_table().lookup_global_source(name))
+    return global->name;
+  return name;
 }
 
 AG_scope<Expression>
@@ -1673,6 +2007,344 @@ PrimaryExpression::generate_ir(LabelCounters& counter,
   }
 
   return std::string(value);
+}
+
+AG_scope<Expression>
+MatchExpression::parse(Parser& parser) {
+  const Token match_token = parser.current_token();
+  parser.advance(); // `match`
+
+  auto match_expr        = AG_cscope<MatchExpression>();
+  match_expr->location   = {match_token.line, match_token.column};
+
+  const bool parenthesized = parser.match(TokenName::AG_LEFT_PAREN);
+  match_expr->scrutinee = Expression::parse_pratt(parser, 0);
+  if (!match_expr->scrutinee)
+    return nullptr;
+  if (parenthesized &&
+      !parser.expect(TokenName::AG_RIGHT_PAREN, error::ExpectedRightParen))
+    return nullptr;
+
+  if (!parser.expect(TokenName::AG_LEFT_BRACE, error::ExpectedLeftBrace))
+    return nullptr;
+
+  while (!parser.check(TokenName::AG_RIGHT_BRACE)) {
+    if (parser.is_at_end()) {
+      print_error(error::UnexpectedEndOfFile, parser);
+      return nullptr;
+    }
+
+    MatchArm arm;
+    arm.location = {parser.current_token().line, parser.current_token().column};
+
+    if (parser.check(TokenName::AG_IDENTIFIER) &&
+        parser.current_token().value == "_") {
+      arm.pattern.kind     = MatchPatternKind::WILDCARD;
+      arm.pattern.location = arm.location;
+      parser.advance();
+    } else if (parser.check(TokenName::AG_INT_LITERAL)) {
+      arm.pattern.kind     = MatchPatternKind::LITERAL;
+      arm.pattern.literal  = std::string(parser.current_token().value);
+      arm.pattern.location = arm.location;
+      parser.advance();
+    } else if (parser.check(TokenName::AG_IDENTIFIER)) {
+      std::string path(parser.current_token().value);
+      parser.advance();
+      while (parser.match(TokenName::AG_DOUBLE_COLON)) {
+        if (!parser.check(TokenName::AG_IDENTIFIER)) {
+          print_error(parser.is_at_end() ? error::UnexpectedEndOfFile
+                                         : error::ExpectedEnumMemberName,
+                      parser);
+          return nullptr;
+        }
+        path += "::";
+        path += parser.current_token().value;
+        parser.advance();
+      }
+
+      const auto separator = path.rfind("::");
+      if (separator == std::string::npos) {
+        print_error(error::ExpectedPattern, parser, arm.location);
+        return nullptr;
+      }
+
+      arm.pattern.kind         = MatchPatternKind::ENUM_VARIANT;
+      arm.pattern.enum_name    = path.substr(0, separator);
+      arm.pattern.variant_name = path.substr(separator + 2);
+      arm.pattern.location     = arm.location;
+
+      if (parser.match(TokenName::AG_LEFT_PAREN)) {
+        if (!parser.check(TokenName::AG_RIGHT_PAREN)) {
+          do {
+            MatchBinding binding;
+            binding.location = {parser.current_token().line, parser.current_token().column};
+            AG_EXPECT_GET_ID_OR_RETURN(
+                parser, error::ExpectedIdentifier, binding.name, nullptr, TokenName::AG_IDENTIFIER);
+            arm.pattern.bindings.push_back(std::move(binding));
+          } while (parser.match(TokenName::AG_COMMA));
+        }
+        AG_EXPECT_OR_RETURN(
+            parser, TokenName::AG_RIGHT_PAREN, error::ExpectedRightParen, nullptr);
+      } else if (parser.match(TokenName::AG_LEFT_BRACE)) {
+        while (!parser.check(TokenName::AG_RIGHT_BRACE)) {
+          if (parser.is_at_end()) {
+            print_error(error::UnexpectedEndOfFile, parser);
+            return nullptr;
+          }
+
+          MatchBinding binding;
+          binding.location = {parser.current_token().line, parser.current_token().column};
+          AG_EXPECT_GET_ID_OR_RETURN(
+              parser, error::ExpectedFieldName, binding.field_name, nullptr, TokenName::AG_IDENTIFIER);
+          binding.name = binding.field_name;
+
+          if (parser.match(TokenName::AG_COLON)) {
+            AG_EXPECT_GET_ID_OR_RETURN(
+                parser, error::ExpectedIdentifier, binding.name, nullptr, TokenName::AG_IDENTIFIER);
+          }
+
+          arm.pattern.bindings.push_back(std::move(binding));
+
+          if (parser.match(TokenName::AG_COMMA))
+            continue;
+          if (!parser.check(TokenName::AG_RIGHT_BRACE)) {
+            print_error(error::ExpectedComma, parser);
+            return nullptr;
+          }
+        }
+        parser.advance(); // `}`
+      }
+    } else {
+      print_error(error::ExpectedPattern, parser);
+      return nullptr;
+    }
+
+    if (parser.match(TokenName::AG_IF)) {
+      arm.guard = Expression::parse_pratt(parser, 0);
+      if (!arm.guard)
+        return nullptr;
+    }
+
+    if (!parser.expect(TokenName::AG_FAT_ARROW, error::ExpectedFatArrow))
+      return nullptr;
+
+    arm.body = Expression::parse_pratt(parser, 0);
+    if (!arm.body)
+      return nullptr;
+
+    match_expr->arms.push_back(std::move(arm));
+
+    if (parser.match(TokenName::AG_COMMA))
+      continue;
+    if (!parser.check(TokenName::AG_RIGHT_BRACE)) {
+      print_error(error::ExpectedComma, parser);
+      return nullptr;
+    }
+  }
+
+  parser.advance(); // `}`
+  return match_expr;
+}
+
+PrimitiveType
+MatchExpression::get_type() {
+  return result_type.primitive_type;
+}
+
+DataType
+MatchExpression::get_data_type() {
+  return result_type;
+}
+
+bool
+MatchExpression::analyze_semantics(Parser&               parser,
+                                   const SourceLocation& location) {
+  const auto& diagnostic_location = this->source_location(location);
+
+  if (!scrutinee ||
+      !scrutinee->analyze_semantics(parser, scrutinee->source_location(diagnostic_location)))
+    return false;
+
+  const auto scrutinee_type = scrutinee->get_data_type();
+  bool       first_result   = true;
+
+  for (auto& arm : arms) {
+    get_symbol_table().enter_scope();
+
+    auto fail = [&]() {
+      get_symbol_table().exit_scope();
+      return false;
+    };
+
+    if (arm.pattern.kind == MatchPatternKind::ENUM_VARIANT) {
+      if (scrutinee_type.kind != TypeKind::ENUM) {
+        print_error(error::IncompatibleTypes, parser, arm.pattern.location);
+        return fail();
+      }
+
+      const auto resolved = resolve_enum_variant(
+          parser, arm.pattern.enum_name + "::" + arm.pattern.variant_name);
+      if (!resolved) {
+        print_error(error::UndefinedMember, parser, arm.pattern.location);
+        return fail();
+      }
+      if (resolved->definition->name != scrutinee_type.type_name) {
+        print_error(error::IncompatibleTypes, parser, arm.pattern.location);
+        return fail();
+      }
+
+      arm.pattern.enum_name     = resolved->definition->name;
+      arm.pattern.variant_index = resolved->variant->index;
+
+      if (arm.pattern.bindings.size() != resolved->variant->fields.size()) {
+        print_error(error::InvalidArgumentCount, parser, arm.pattern.location);
+        return fail();
+      }
+
+      for (size_t i = 0; i < arm.pattern.bindings.size(); ++i) {
+        auto& binding = arm.pattern.bindings[i];
+        const auto* field = binding.field_name.empty()
+                                ? &resolved->variant->fields[i]
+                                : resolved->variant->find_field(binding.field_name);
+        if (!field) {
+          print_error(error::UndefinedMember, parser, binding.location);
+          return fail();
+        }
+
+        binding.field_index = static_cast<size_t>(field - resolved->variant->fields.data());
+        binding.type        = field->type;
+
+        Declaration declaration;
+        declaration.type     = field->type;
+        declaration.timing   = ValueTiming::RUNTIME;
+        declaration.location = binding.location;
+        if (!get_symbol_table().insert(binding.name, declaration)) {
+          print_error(error::RedefinitionOfSymbol, parser, binding.location);
+          return fail();
+        }
+      }
+    } else if (arm.pattern.kind == MatchPatternKind::LITERAL) {
+      if (scrutinee_type.primitive_type == PrimitiveType::UNEXPECTED ||
+          !is_compatible_datatype(PrimitiveType::INT, scrutinee_type.primitive_type)) {
+        print_error(error::InvalidOperandTypes, parser, arm.pattern.location);
+        return fail();
+      }
+    }
+
+    if (arm.guard &&
+        !arm.guard->analyze_semantics(parser,
+                                      arm.guard->source_location(diagnostic_location)))
+      return fail();
+
+    if (!arm.body ||
+        !arm.body->analyze_semantics(parser,
+                                     arm.body->source_location(diagnostic_location)))
+      return fail();
+
+    const auto body_type = arm.body->get_data_type();
+    if (first_result) {
+      result_type  = body_type;
+      first_result = false;
+    } else if (!is_compatible_type(result_type, body_type)) {
+      print_error(error::IncompatibleTypes, parser, arm.body->source_location(diagnostic_location));
+      return fail();
+    }
+
+    get_symbol_table().exit_scope();
+  }
+
+  if (first_result) {
+    print_error(error::ExpectedPattern, parser, diagnostic_location);
+    return false;
+  }
+
+  return true;
+}
+
+std::string
+MatchExpression::generate_ir(LabelCounters& counter,
+                             Parser&        parser) {
+  if (!scrutinee)
+    return "0";
+
+  const auto scrutinee_value = scrutinee->generate_ir(counter, parser);
+
+  std::string result;
+  if (result_type.primitive_type != PrimitiveType::VOID) {
+    result = make_temp(counter, parser);
+    parser.add_instructios(AG_cscope<Assign>("0", result, counter.function_index));
+  }
+
+  const auto end_label = counter.block_label++;
+
+  for (const auto& arm : arms) {
+    const auto next_label = counter.block_label++;
+
+    std::string condition;
+    if (arm.pattern.kind == MatchPatternKind::ENUM_VARIANT) {
+      const auto tag = make_temp(counter, parser);
+      parser.add_instructios(
+          AG_cscope<MemberLoad>(tag, scrutinee_value, 0, counter.function_index));
+      condition = make_temp(counter, parser);
+      parser.add_instructios(AG_cscope<Binary>(condition,
+                                               tag,
+                                               std::to_string(arm.pattern.variant_index),
+                                               BIN_OPERATOR::EQUAL_TO,
+                                               counter.function_index));
+    } else if (arm.pattern.kind == MatchPatternKind::LITERAL) {
+      condition = make_temp(counter, parser);
+      parser.add_instructios(AG_cscope<Binary>(condition,
+                                               scrutinee_value,
+                                               arm.pattern.literal,
+                                               BIN_OPERATOR::EQUAL_TO,
+                                               counter.function_index));
+    }
+
+    if (!condition.empty())
+      parser.add_instructios(
+          AG_cscope<CondJump>(condition, "b" + std::to_string(next_label), counter.function_index));
+
+    if (arm.pattern.kind == MatchPatternKind::ENUM_VARIANT) {
+      const auto* definition = get_enum_table().lookup(arm.pattern.enum_name);
+      if (definition && arm.pattern.variant_index < definition->variants.size()) {
+        const auto& variant = definition->variants[arm.pattern.variant_index];
+        for (const auto& binding : arm.pattern.bindings) {
+          if (binding.field_index >= variant.fields.size())
+            continue;
+
+          const auto value = make_temp(counter, parser);
+          parser.add_instructios(AG_cscope<MemberLoad>(
+              value,
+              scrutinee_value,
+              static_cast<uint32_t>(variant.fields[binding.field_index].byte_offset),
+              counter.function_index));
+
+          auto variable = get_ir_table().declare_user(counter.function_index,
+                                                      binding.name,
+                                                      get_type_size(binding.type));
+          const std::string destination = variable ? variable->name : binding.name;
+          parser.add_instructios(
+              AG_cscope<Assign>(value, destination, counter.function_index));
+        }
+      }
+    }
+
+    if (arm.guard) {
+      const auto guard_value = arm.guard->generate_ir(counter, parser);
+      parser.add_instructios(
+          AG_cscope<CondJump>(guard_value, "b" + std::to_string(next_label), counter.function_index));
+    }
+
+    const auto body_value = arm.body->generate_ir(counter, parser);
+    if (!result.empty())
+      parser.add_instructios(AG_cscope<Assign>(body_value, result, counter.function_index));
+
+    parser.add_instructios(AG_cscope<Jump>("b" + std::to_string(end_label), counter.function_index));
+    parser.add_instructios(AG_cscope<Label>("b" + std::to_string(next_label)));
+  }
+
+  parser.add_instructios(AG_cscope<Label>("b" + std::to_string(end_label)));
+  return result;
 }
 
 } // namespace ag

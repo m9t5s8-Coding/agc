@@ -13,6 +13,15 @@
 namespace ag {
 
 AG_scope<Statements>
+ReturnStatement::Create(AG_scope<Expression> expression,
+                        SourceLocation      location) {
+  auto return_stmt        = AG_cscope<ReturnStatement>();
+  return_stmt->m_location = location;
+  return_stmt->m_return_expr = std::move(expression);
+  return return_stmt;
+}
+
+AG_scope<Statements>
 ReturnStatement::ParseReturn(Parser& parser) {
   const Token return_token = parser.current_token();
   parser.advance();

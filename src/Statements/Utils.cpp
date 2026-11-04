@@ -93,19 +93,38 @@ parse_type(Parser& parser) {
     return std::nullopt;
   }
 
+  std::string raw_name(parser.current_token().value);
+  parser.advance();
+
+  while (parser.match(TokenName::AG_DOUBLE_COLON)) {
+    if (!parser.check(TokenName::AG_IDENTIFIER)) {
+      print_error(parser.is_at_end() ? error::UnexpectedEndOfFile : error::ExpectedTypeName,
+                  parser);
+      return std::nullopt;
+    }
+    raw_name += "::";
+    raw_name += parser.current_token().value;
+    parser.advance();
+  }
+
   DataType type;
-  type.type_name      = parser.current_token().value;
-  type.primitive_type = get_datatypes(type.type_name);
+  const std::string resolved_name = parser.resolve_type_name(raw_name);
+  type.type_name                  = parser.intern_name(resolved_name);
+  type.primitive_type             = get_datatypes(type.type_name);
 
   if (type.primitive_type == PrimitiveType::USER_DEFINED) {
     if (const auto* definition = get_struct_table().lookup(type.type_name)) {
       type.kind          = TypeKind::STRUCT;
+      type.type_name     = definition->name;
+      type.size_in_bytes = definition->size_in_bytes;
+      type.alignment     = definition->alignment;
+    } else if (const auto* definition = get_enum_table().lookup(type.type_name)) {
+      type.kind          = TypeKind::ENUM;
+      type.type_name     = definition->name;
       type.size_in_bytes = definition->size_in_bytes;
       type.alignment     = definition->alignment;
     }
   }
-
-  parser.advance();
 
   while (parser.match(TokenName::AG_ASTERISK)) {
     auto pointee = std::make_shared<DataType>(type);
@@ -270,9 +289,21 @@ add_system_call_function(CodeGenContext& context) {
                      "\tret\n\n";
 }
 
+ModuleTable&
+get_module_table() {
+  static ModuleTable table;
+  return table;
+}
+
 StructTable&
 get_struct_table() {
   static StructTable table;
+  return table;
+}
+
+EnumTable&
+get_enum_table() {
+  static EnumTable table;
   return table;
 }
 
@@ -292,5 +323,30 @@ make_struct_type(std::string_view name) {
   }
 
   return type;
+}
+
+DataType
+make_enum_type(std::string_view name) {
+  DataType type;
+  type.kind           = TypeKind::ENUM;
+  type.primitive_type = PrimitiveType::USER_DEFINED;
+  type.type_name      = name;
+
+  if (const auto* definition = get_enum_table().lookup(name)) {
+    type.type_name     = definition->name;
+    type.size_in_bytes = definition->size_in_bytes;
+    type.alignment     = definition->alignment;
+  }
+
+  return type;
+}
+
+DataType
+make_named_type(std::string_view name) {
+  if (const auto* definition = get_struct_table().lookup(name))
+    return make_struct_type(definition->name);
+  if (const auto* definition = get_enum_table().lookup(name))
+    return make_enum_type(definition->name);
+  return make_struct_type(name);
 }
 } // namespace ag

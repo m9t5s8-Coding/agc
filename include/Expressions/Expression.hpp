@@ -248,6 +248,39 @@ public:
   size_t           index = 0;
 };
 
+// `math::sqrt`, `geometry::Point`, or `ag::io::println`.  The path is kept in
+// source spelling until semantic analysis resolves import aliases.
+class QualifiedNameExpression : public Expression {
+public:
+  std::string path;
+  std::string resolved_path;
+
+  static AG_scope<Expression>
+  parse(Parser&              parser,
+        std::string          first_segment,
+        const SourceLocation& location);
+
+  virtual PrimitiveType
+  get_type() override;
+
+  virtual DataType
+  get_data_type() override;
+
+  virtual bool
+  analyze_semantics(Parser&,
+                    const SourceLocation&) override;
+
+  virtual std::string
+  generate_ir(LabelCounters& counter,
+              Parser&         parser) override;
+
+private:
+  bool        m_is_enum_value = false;
+  std::string m_enum_name;
+  size_t      m_variant_index = 0;
+  DataType    m_result_type;
+};
+
 class MemberExpression : public Expression {
 public:
   AG_scope<Expression> object;
@@ -312,6 +345,11 @@ public:
               Parser&         parser) override;
 
   DataType result_type;
+
+private:
+  bool        m_is_enum_literal = false;
+  std::string m_enum_name;
+  size_t      m_variant_index = 0;
 };
 
 class CallExpression : public Expression {
@@ -340,7 +378,10 @@ public:
 private:
   std::string m_label;
   DataType    m_result_type;
-  bool        m_is_method = false;
+  bool        m_is_method          = false;
+  bool        m_is_enum_constructor = false;
+  std::string m_enum_name;
+  size_t      m_variant_index = 0;
 };
 
 class IndexExpression : public Expression {
@@ -366,6 +407,66 @@ public:
               Parser&         parser) override {
     return "";
   }
+};
+
+enum class MatchPatternKind {
+  WILDCARD,
+  LITERAL,
+  ENUM_VARIANT,
+};
+
+struct MatchBinding {
+  std::string    name;
+  std::string    field_name;
+  size_t         field_index = 0;
+  DataType       type;
+  SourceLocation location;
+};
+
+struct MatchPattern {
+  MatchPatternKind           kind = MatchPatternKind::WILDCARD;
+  std::string                enum_name;
+  std::string                variant_name;
+  size_t                     variant_index = 0;
+  std::string                literal;
+  std::vector<MatchBinding>  bindings;
+  SourceLocation             location;
+};
+
+struct MatchArm {
+  MatchPattern         pattern;
+  AG_scope<Expression> guard;
+  AG_scope<Expression> body;
+  SourceLocation       location;
+};
+
+// match value {
+//   Status::Ok => true,
+//   Status::Error(message) => false,
+//   _ => false,
+// }
+class MatchExpression : public Expression {
+public:
+  AG_scope<Expression>    scrutinee;
+  std::vector<MatchArm>   arms;
+  DataType                result_type;
+
+  static AG_scope<Expression>
+  parse(Parser& parser);
+
+  virtual PrimitiveType
+  get_type() override;
+
+  virtual DataType
+  get_data_type() override;
+
+  virtual bool
+  analyze_semantics(Parser&,
+                    const SourceLocation&) override;
+
+  virtual std::string
+  generate_ir(LabelCounters& counter,
+              Parser&         parser) override;
 };
 
 } // namespace ag
