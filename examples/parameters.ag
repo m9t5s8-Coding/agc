@@ -1,0 +1,41 @@
+# Function parameter forms and default arguments.
+#
+# Build and run:
+#   build/agc examples/parameters.ag -o parameters
+#   ./parameters
+#
+# The same source also works with the LLVM backend:
+#   build/agc examples/parameters.ag --llvm -o parameters-llvm
+#   ./parameters-llvm
+
+struct Counter {
+    value: int,
+}
+
+impl Counter {
+    # Methods can have trailing default arguments too.
+    func plus(self, amount: int = 1) -> int => self.value + amount;
+}
+
+# Parameters may omit the name.  The value still occupies its ABI position,
+# but the body cannot refer to it.
+func second_of(int, value: int) -> int => value;
+
+# Default arguments are evaluated at the call site.
+func add(a: int, b: int = 10) -> int => a + b;
+func pair(a: int = 2, b: int = 3) -> int => a * 10 + b;
+
+# A default may be an arbitrary expression, including a struct literal.
+func counter_value(counter: Counter = Counter { value: 4 }) -> int => counter.value;
+
+func main() -> int {
+    let counter: Counter = Counter { value: 7 };
+
+    let first: int = add(5);              # 15
+    let second: int = second_of(99, 1);   # 1
+    let third: int = pair();              # 23
+    let fourth: int = counter.plus();     # 8
+    let fifth: int = counter_value();     # 4
+
+    return first + second + third + fourth + fifth;
+}

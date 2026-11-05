@@ -39,6 +39,7 @@ AG_scope<Statements>
 ImplStatement::ParseImpl(Parser& parser) {
   const Token impl_token = parser.current_token();
   parser.advance(); // `impl`
+  parser.take_pending_public(); // `pub impl` has no additional effect yet
 
   auto impl_stmt        = AG_cscope<ImplStatement>();
   impl_stmt->m_location = {impl_token.line, impl_token.column};
@@ -72,6 +73,9 @@ ImplStatement::ParseImpl(Parser& parser) {
       print_error(error::UnexpectedEndOfFile, parser);
       return nullptr;
     }
+
+    const bool method_public = parser.match(TokenName::AG_PUB);
+    parser.set_pending_public(method_public);
 
     if (!parser.check(TokenName::AG_FUNC)) {
       print_error(error::ExpectedStatement, parser);

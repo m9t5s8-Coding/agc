@@ -376,12 +376,13 @@ public:
               Parser&         parser) override;
 
 private:
-  std::string m_label;
-  DataType    m_result_type;
-  bool        m_is_method          = false;
-  bool        m_is_enum_constructor = false;
-  std::string m_enum_name;
-  size_t      m_variant_index = 0;
+  std::string                    m_label;
+  DataType                       m_result_type;
+  std::vector<FunctionParameter> m_resolved_parameters;
+  bool                           m_is_method          = false;
+  bool                           m_is_enum_constructor = false;
+  std::string                    m_enum_name;
+  size_t                         m_variant_index = 0;
 };
 
 class IndexExpression : public Expression {

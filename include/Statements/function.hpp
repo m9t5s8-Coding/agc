@@ -63,5 +63,6 @@ private:
   AG_scope<Statements> m_function_body;
   bool                 is_declaration = false;
   bool                 m_is_operator  = false;
+  bool                 m_is_public    = false;
 };
 } // namespace ag

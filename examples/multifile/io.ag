@@ -1,0 +1,52 @@
+func string_length(text: string) -> int {
+    var length: int = 0;
+    while (text[length] != 0) {
+        length = length + 1;
+    }
+    return length;
+}
+
+pub func print_text(text: string) -> void {
+    write(text, string_length(text));
+    return;
+}
+
+pub func print_int(value: int) -> void {
+    var buffer: string = alloc(32);
+    var number: int = value;
+    var length: int = 0;
+    var left: int = 0;
+    var right: int = 0;
+    var temporary: int = 0;
+
+    if (number == 0) {
+        buffer[0] = 48;  # '0'
+        length = 1;
+    }
+
+    while (number > 0) {
+        buffer[length] = 48 + (number % 10);
+        length = length + 1;
+        number = number / 10;
+    }
+
+    left = 0;
+    right = length - 1;
+    while (left < right) {
+        temporary = buffer[left];
+        buffer[left] = buffer[right];
+        buffer[right] = temporary;
+        left = left + 1;
+        right = right - 1;
+    }
+
+    write(buffer, length);
+    free(buffer);
+    return;
+}
+
+pub func print_line(value: int) -> void {
+    print_int(value);
+    print_text("\n");
+    return;
+}

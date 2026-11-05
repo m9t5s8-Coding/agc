@@ -1,5 +1,6 @@
 #include "Statements/function.hpp"
 
+#include "Expressions/Expression.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/return.hpp"
 #include "IR/IR.hpp"
@@ -22,9 +23,9 @@ parse_function_parameter(Parser& parser) {
   if (parser.match(TokenName::AG_RIGHT_PAREN))
     return l_parameters;
 
-  FunctionParameter param;
+  bool saw_default = false;
   while (parser.is_valid()) {
-
+    FunctionParameter param;
     param.location = {parser.current_token().line, parser.current_token().column};
 
     const bool is_mut = parser.match(TokenName::AG_MUT);
@@ -51,24 +52,34 @@ parse_function_parameter(Parser& parser) {
         return std::nullopt;
       }
 
-      AG_EXPECT_GET_ID_OR_RETURN(
-          parser, ag::error::ExpectedFunctionName, param.name, std::nullopt, TokenName::AG_IDENTIFIER);
-
-      AG_EXPECT_OR_RETURN(parser, TokenName::AG_COLON, ag::error::ExpectedColon, std::nullopt);
+      // Parameters may be written as `name: Type` or as just `Type`.  The
+      // latter is an unnamed parameter that is still part of the ABI but
+      // cannot be referenced from the function body.
+      if (parser.check(TokenName::AG_IDENTIFIER) &&
+          parser.peek_token().token_name == TokenName::AG_COLON) {
+        param.name = parser.current_token().value;
+        parser.advance(); // name
+        parser.advance(); // ':'
+      }
 
       auto type = parse_type(parser);
       if (!type)
         return std::nullopt;
 
-      if (type->primitive_type == PrimitiveType::USER_DEFINED && type->type_name == "Self" &&
-          !parser.current_impl_type().empty()) {
-        *type = make_named_type(parser.current_impl_type());
-      }
-
       param.type = std::move(*type);
     }
 
-    l_parameters.push_back(param);
+    if (parser.match(TokenName::AG_ASSIGN)) {
+      AG_scope<Expression> default_expression;
+      AG_PARSE_EXPRESSION_OR_RETURN(parser, default_expression, std::nullopt);
+      param.default_value = std::shared_ptr<Expression>(std::move(default_expression));
+      saw_default         = true;
+    } else if (saw_default) {
+      print_error(error::DefaultArgumentNotTrailing, parser, param.location);
+      return std::nullopt;
+    }
+
+    l_parameters.push_back(std::move(param));
     if (!parser.match(TokenName::AG_COMMA))
       break;
   }
@@ -222,6 +233,7 @@ FunctionStatement::ParseFunction(Parser& parser) {
   parser.advance();
 
   auto        function_stmt = AG_cscope<FunctionStatement>();
+  function_stmt->m_is_public = parser.take_pending_public();
   TokenName   temp_token;
   const Token function_token = parser.current_token();
 
@@ -291,6 +303,7 @@ FunctionStatement::ParseOperator(Parser& parser) {
   auto function_stmt           = AG_cscope<FunctionStatement>();
   function_stmt->m_location    = {operator_token.line, operator_token.column};
   function_stmt->m_is_operator = true;
+  function_stmt->m_is_public   = parser.take_pending_public();
   function_stmt->m_module_path = parser.current_module_path();
 
   std::string                   symbol;
@@ -395,9 +408,11 @@ FunctionStatement::register_function(Parser& parser) {
   FunctionEntry entry;
   entry.name        = source_name();
   entry.label       = function_label();
+  entry.module_path = m_module_path;
   entry.return_type = std::make_shared<DataType>(m_return_type);
   entry.parameters  = m_parameters;
   entry.is_defined  = !is_declaration;
+  entry.is_public   = m_is_public;
   entry.location    = m_location;
 
   if (!get_function_table().declare(entry.label, entry)) {
@@ -409,9 +424,28 @@ FunctionStatement::register_function(Parser& parser) {
 
 bool
 FunctionStatement::analyze_semantics(Parser& parser) {
+  // Default arguments are evaluated at the call site.  Analyze them before
+  // entering the parameter scope so they cannot accidentally refer to a
+  // parameter that does not exist in the caller's context.
+  for (const auto& param : m_parameters) {
+    if (!param.default_value)
+      continue;
+
+    const auto& default_location = param.default_value->source_location(param.location);
+    if (!param.default_value->analyze_semantics(parser, default_location))
+      return false;
+    if (!is_compatible_type(param.type, param.default_value->get_data_type())) {
+      print_error(error::IncompatibleTypes, parser, default_location);
+      return false;
+    }
+  }
+
   get_symbol_table().enter_scope();
   Declaration data;
   for (const auto& param : m_parameters) {
+    if (param.name.empty())
+      continue;
+
     data.type     = param.type;
     data.timing   = ValueTiming::RUNTIME;
     data.location = param.location;
@@ -451,6 +485,9 @@ FunctionStatement::generate_ir(LabelCounters& counter,
   // name uniformly: give each parameter a stack slot and let the prologue
   // spill the incoming register into it.
   for (size_t i = 0; i < m_parameters.size(); ++i) {
+    if (m_parameters[i].name.empty())
+      continue;
+
     get_ir_table().declare_user(counter.function_index,
                                 m_parameters[i].name,
                                 get_type_size(m_parameters[i].type),

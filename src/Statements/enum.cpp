@@ -60,6 +60,7 @@ AG_scope<Statements>
 EnumStatement::ParseEnum(Parser& parser) {
   const Token enum_token = parser.current_token();
   parser.advance(); // `enum`
+  parser.take_pending_public(); // type visibility is not enforced yet
 
   auto enum_stmt        = AG_cscope<EnumStatement>();
   enum_stmt->m_location = {enum_token.line, enum_token.column};

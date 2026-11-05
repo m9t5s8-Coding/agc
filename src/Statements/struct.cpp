@@ -18,6 +18,7 @@ AG_scope<Statements>
 StructStatement::ParseStruct(Parser& parser) {
   const Token struct_token = parser.current_token();
   parser.advance(); // `struct`
+  parser.take_pending_public(); // type visibility is not enforced yet
 
   auto struct_stmt        = AG_cscope<StructStatement>();
   struct_stmt->m_location = {struct_token.line, struct_token.column};
@@ -39,12 +40,9 @@ StructStatement::ParseStruct(Parser& parser) {
       return nullptr;
     }
 
-    // `pub` is accepted for source compatibility with the language plan.  The
-    // current implementation has a single visibility level.
-    parser.match(TokenName::AG_PUB);
-
     StructMember member;
-    member.location = {parser.current_token().line, parser.current_token().column};
+    member.is_public = parser.match(TokenName::AG_PUB);
+    member.location  = {parser.current_token().line, parser.current_token().column};
 
     AG_EXPECT_GET_ID_OR_RETURN(
         parser, error::ExpectedFieldName, member.name, nullptr, TokenName::AG_IDENTIFIER);

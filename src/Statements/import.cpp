@@ -44,6 +44,7 @@ AG_scope<Statements>
 ImportStatement::ParseImport(Parser& parser) {
   const Token import_token = parser.current_token();
   parser.advance(); // `import`
+  parser.take_pending_public(); // import visibility is not enforced yet
 
   auto import_stmt        = AG_cscope<ImportStatement>();
   import_stmt->m_location = {import_token.line, import_token.column};

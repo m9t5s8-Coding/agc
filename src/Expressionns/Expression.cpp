@@ -228,6 +228,7 @@ make_builtin_entry(std::string_view name) {
     if (is_allocation)
       *entry.return_type = make_void_pointer();
     entry.is_defined = true;
+    entry.is_public  = true;
 
     for (const auto parameter_type : builtin.parameter_types) {
       FunctionParameter parameter;
@@ -241,6 +242,19 @@ make_builtin_entry(std::string_view name) {
   }
 
   return std::nullopt;
+}
+
+bool
+is_function_visible(Parser& parser, const FunctionEntry& entry) {
+  return is_visible_from(entry.is_public, entry.module_path, parser.current_module_path());
+}
+
+bool
+is_member_visible(Parser&                 parser,
+                  const StructDefinition& definition,
+                  const StructMember&     member) {
+  return is_visible_from(
+      member.is_public, declaring_module(definition.name), parser.current_module_path());
 }
 
 struct OperatorResolution {
@@ -262,6 +276,8 @@ resolve_operator_overload(Parser&                          parser,
 
   for (const auto& candidate : candidates) {
     if (!candidate.is_defined)
+      continue;
+    if (!is_function_visible(parser, candidate))
       continue;
     if (parser.is_operator_context_active(candidate.label))
       continue;
@@ -765,6 +781,11 @@ MemberExpression::analyze_semantics(Parser&               parser,
     return false;
   }
 
+  if (!is_member_visible(parser, *definition, *member)) {
+    print_error(error::PrivateMember, parser, diagnostic_location);
+    return false;
+  }
+
   member_type  = member->type;
   byte_offset  = member->byte_offset;
   member_found = true;
@@ -805,6 +826,20 @@ StructLiteralExpression::analyze_semantics(Parser&               parser,
     type_name   = definition->name;
     result_type = make_struct_type(type_name);
 
+    // A struct literal outside the declaring module must not be able to
+    // construct a value while skipping private fields.  Such types must be
+    // built through a public function provided by their module.
+    if (!is_visible_from(false,
+                         declaring_module(definition->name),
+                         parser.current_module_path())) {
+      for (const auto& member : definition->members) {
+        if (!member.is_public) {
+          print_error(error::PrivateMember, parser, diagnostic_location);
+          return false;
+        }
+      }
+    }
+
     if (spread) {
       if (!spread->analyze_semantics(parser, spread->source_location(diagnostic_location)))
         return false;
@@ -822,6 +857,11 @@ StructLiteralExpression::analyze_semantics(Parser&               parser,
       const auto* member = definition->find_member(initializer.name);
       if (!member) {
         print_error(error::UndefinedMember, parser, initializer.location);
+        return false;
+      }
+
+      if (!is_member_visible(parser, *definition, *member)) {
+        print_error(error::PrivateMember, parser, initializer.location);
         return false;
       }
 
@@ -1014,10 +1054,20 @@ CallExpression::analyze_semantics(Parser&               parser,
       return false;
     }
 
-    candidates = get_function_table().lookup_all(
+    const auto method_candidates = get_function_table().lookup_all(
         std::string(receiver_type.type_name) + "." + member_callee->field_name);
+    bool saw_private_method = false;
+    for (const auto& candidate : method_candidates) {
+      if (!is_function_visible(parser, candidate)) {
+        saw_private_method = true;
+        continue;
+      }
+      candidates.push_back(candidate);
+    }
     if (candidates.empty()) {
-      print_error(error::UndefinedFunction, parser, diagnostic_location);
+      print_error(saw_private_method ? error::PrivateFunction : error::UndefinedFunction,
+                  parser,
+                  diagnostic_location);
       return false;
     }
 
@@ -1037,9 +1087,27 @@ CallExpression::analyze_semantics(Parser&               parser,
     }
 
     const std::string resolved_name = parser.resolve_symbol_name(function_name);
-    candidates                      = get_function_table().lookup_all(resolved_name);
+    bool              saw_private_function = false;
+    auto collect_visible_candidates = [&](const std::string& lookup_name) {
+      std::vector<FunctionEntry> visible;
+      for (const auto& candidate : get_function_table().lookup_all(lookup_name)) {
+        if (!is_function_visible(parser, candidate)) {
+          saw_private_function = true;
+          continue;
+        }
+        visible.push_back(candidate);
+      }
+      return visible;
+    };
+
+    candidates = collect_visible_candidates(resolved_name);
     if (candidates.empty() && resolved_name != function_name)
-      candidates = get_function_table().lookup_all(function_name);
+      candidates = collect_visible_candidates(function_name);
+
+    if (candidates.empty() && saw_private_function) {
+      print_error(error::PrivateFunction, parser, diagnostic_location);
+      return false;
+    }
 
     if (candidates.empty()) {
       if (const auto enum_variant = resolve_enum_variant(parser, function_name)) {
@@ -1103,8 +1171,19 @@ CallExpression::analyze_semantics(Parser&               parser,
       continue;
     saw_defined_candidate = true;
 
-    if (!candidate.is_variadic && argument_types.size() != candidate.parameters.size())
-      continue;
+    if (!candidate.is_variadic) {
+      size_t required_parameters = candidate.parameters.size();
+      for (size_t i = 0; i < candidate.parameters.size(); ++i) {
+        if (candidate.parameters[i].default_value) {
+          required_parameters = i;
+          break;
+        }
+      }
+
+      if (argument_types.size() < required_parameters ||
+          argument_types.size() > candidate.parameters.size())
+        continue;
+    }
     saw_matching_arity = true;
 
     bool compatible = true;
@@ -1157,8 +1236,9 @@ CallExpression::analyze_semantics(Parser&               parser,
       return false;
   }
 
-  m_label       = resolved->label;
-  m_result_type = resolved->return_type ? *resolved->return_type : DataType{};
+  m_label               = resolved->label;
+  m_result_type         = resolved->return_type ? *resolved->return_type : DataType{};
+  m_resolved_parameters = resolved->parameters;
   return true;
 }
 
@@ -1210,9 +1290,20 @@ CallExpression::generate_ir(LabelCounters& counter,
   }
 
   std::vector<std::string> argument_values;
-  argument_values.reserve(arguments.size());
+  argument_values.reserve(arguments.size() + m_resolved_parameters.size());
   for (const auto& argument : arguments)
     argument_values.push_back(argument->generate_ir(counter, parser));
+
+  // Fill omitted trailing arguments with their declared defaults.  The
+  // defaults are analyzed once at the declaration site, but evaluated here in
+  // the caller so they can produce normal IR values.
+  const size_t first_explicit = m_is_method ? 1 : 0;
+  for (size_t i = first_explicit + arguments.size(); i < m_resolved_parameters.size(); ++i) {
+    const auto& parameter = m_resolved_parameters[i];
+    if (!parameter.default_value)
+      return "";
+    argument_values.push_back(parameter.default_value->generate_ir(counter, parser));
+  }
 
   if (m_is_method)
     parser.add_instructios(AG_cscope<Param>(receiver_value, counter.function_index));

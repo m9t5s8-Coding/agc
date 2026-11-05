@@ -93,6 +93,9 @@ parse_type(Parser& parser) {
     return std::nullopt;
   }
 
+  const SourceLocation type_location = {parser.current_token().line,
+                                        parser.current_token().column};
+
   std::string raw_name(parser.current_token().value);
   parser.advance();
 
@@ -112,8 +115,16 @@ parse_type(Parser& parser) {
   type.type_name                  = parser.intern_name(resolved_name);
   type.primitive_type             = get_datatypes(type.type_name);
 
+  bool unresolved_user_type = false;
+
   if (type.primitive_type == PrimitiveType::USER_DEFINED) {
-    if (const auto* definition = get_struct_table().lookup(type.type_name)) {
+    if (type.type_name == "Self") {
+      if (parser.current_impl_type().empty()) {
+        print_error(error::UndefinedType, parser, type_location);
+        return std::nullopt;
+      }
+      type = make_named_type(parser.current_impl_type());
+    } else if (const auto* definition = get_struct_table().lookup(type.type_name)) {
       type.kind          = TypeKind::STRUCT;
       type.type_name     = definition->name;
       type.size_in_bytes = definition->size_in_bytes;
@@ -123,10 +134,18 @@ parse_type(Parser& parser) {
       type.type_name     = definition->name;
       type.size_in_bytes = definition->size_in_bytes;
       type.alignment     = definition->alignment;
+    } else {
+      // Pointers to incomplete user-defined types are useful for opaque
+      // handles (for example the `ostream*` stream type in the examples).
+      // A non-pointer declaration, however, must name a real type.
+      unresolved_user_type = true;
     }
   }
 
+  bool has_pointer = false;
   while (parser.match(TokenName::AG_ASTERISK)) {
+    has_pointer = true;
+
     auto pointee = std::make_shared<DataType>(type);
 
     DataType pointer;
@@ -134,6 +153,11 @@ parse_type(Parser& parser) {
     pointer.primitive_type = PrimitiveType::USER_DEFINED;
     pointer.pointee        = std::move(pointee);
     type                   = std::move(pointer);
+  }
+
+  if (unresolved_user_type && !has_pointer) {
+    print_error(error::UndefinedType, parser, type_location);
+    return std::nullopt;
   }
 
   return type;

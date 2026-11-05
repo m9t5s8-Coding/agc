@@ -19,6 +19,7 @@ AG_scope<Statements>
 ModuleStatement::ParseModule(Parser& parser) {
   const Token module_token = parser.current_token();
   parser.advance(); // `mod`
+  parser.take_pending_public(); // module visibility is not enforced yet
 
   auto module_stmt        = AG_cscope<ModuleStatement>();
   module_stmt->m_location = {module_token.line, module_token.column};

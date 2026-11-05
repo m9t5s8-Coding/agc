@@ -94,6 +94,7 @@ struct StructMember {
   std::string    name;
   DataType       type;
   size_t         byte_offset = 0;
+  bool           is_public   = false;
   SourceLocation location;
 };
 
@@ -338,20 +339,56 @@ struct SymbolEntry {
   SourceLocation location;
 };
 
+// The module part of a fully-qualified declaration name.  Top-level names
+// have an empty module path.
+inline std::string
+declaring_module(std::string_view qualified_name) {
+  const auto separator = qualified_name.rfind("::");
+  if (separator == std::string_view::npos)
+    return {};
+  return std::string(qualified_name.substr(0, separator));
+}
+
+// Items are private by default.  A private declaration is visible from the
+// module that declared it and from descendant modules; `pub` makes it visible
+// from any module.  The top-level module is the root, so its private items are
+// visible throughout the translation unit.
+inline bool
+is_module_or_ancestor(std::string_view ancestor, std::string_view module) {
+  if (ancestor == module || ancestor.empty())
+    return true;
+  if (module.size() <= ancestor.size())
+    return false;
+  return module.compare(0, ancestor.size(), ancestor) == 0 &&
+         module.substr(ancestor.size(), 2) == "::";
+}
+
+inline bool
+is_visible_from(bool             is_public,
+                std::string_view declaration_module,
+                std::string_view current_module) {
+  return is_public || is_module_or_ancestor(declaration_module, current_module);
+}
+
+class Expression;
+
 struct FunctionParameter {
-  std::string    name;
-  DataType       type;
-  SourceLocation location;
+  std::string                 name; // empty for an unnamed parameter
+  DataType                    type;
+  std::shared_ptr<Expression> default_value; // evaluated at the call site
+  SourceLocation              location;
 };
 
 struct FunctionEntry {
   std::string                    name; // unqualified function name
   std::string                    label; // mangled assembly/IR label
+  std::string                    module_path;
   std::shared_ptr<DataType>      return_type;
   std::vector<FunctionParameter> parameters;
   bool                           is_variadic = false;
   bool                           is_defined  = false; // has a body, vs. just declared
   bool                           is_used     = false;
+  bool                           is_public   = false;
 
   uint32_t       scope_id = 0; // scope the function body introduces
   SourceLocation location;

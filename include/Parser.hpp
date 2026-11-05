@@ -319,6 +319,22 @@ public:
     return current_module_path() + "::" + std::string(name);
   }
 
+  // `pub` is parsed by the generic statement dispatcher before the actual
+  // declaration parser runs.  The flag is consumed by the declaration that
+  // owns the visibility, and cleared afterwards so it cannot leak into a
+  // nested declaration.
+  void
+  set_pending_public(bool value) {
+    m_pending_public = value;
+  }
+
+  bool
+  take_pending_public() {
+    const bool value = m_pending_public;
+    m_pending_public = false;
+    return value;
+  }
+
   // Resolve an unqualified or module-qualified source name through the import
   // bindings of the active module.  Function calls and type references both
   // use this path so `math::sqrt`, `m::sqrt`, and `import math { sqrt }`
@@ -396,6 +412,7 @@ private:
   std::vector<std::string> m_impl_types;
   std::vector<std::string> m_module_paths;
   std::deque<std::string>  m_operator_names;
+  bool                     m_pending_public = false;
 
   std::vector<AG_scope<Statements>>   m_statements;
   std::vector<AG_scope<Instructions>> m_instructions;

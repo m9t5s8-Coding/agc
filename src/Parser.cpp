@@ -343,10 +343,12 @@ Parser::parse_statement() {
     return ModuleStatement::ParseModule(*this);
   }
   case TokenName::AG_PUB: {
-    // Visibility is accepted for source compatibility; the current language
-    // has a single visibility level.
     advance();
-    return parse_statement();
+    const bool previous_public = m_pending_public;
+    set_pending_public(true);
+    auto statement = parse_statement();
+    set_pending_public(previous_public);
+    return statement;
   }
   case TokenName::AG_OPERATOR: {
     if (looks_like_operator_declaration(*this))
