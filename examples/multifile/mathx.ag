@@ -1,3 +1,0 @@
-pub func square(value: int) -> int => value * value;
-
-pub func add(left: int, right: int) -> int => left + right;

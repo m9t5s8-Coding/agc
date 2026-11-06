@@ -182,12 +182,27 @@ static constexpr int POSTFIX_BP = 100;
 
 namespace {
 
-struct BuiltinFunction {
-  std::string_view           name;
-  std::string_view           label;
-  PrimitiveType              return_type;
-  std::vector<PrimitiveType> parameter_types;
+struct BuiltinParameter {
+  PrimitiveType type            = PrimitiveType::INT;
+  bool          is_void_pointer = false;
 };
+
+struct BuiltinFunction {
+  std::string_view              name;
+  std::string_view              label;
+  PrimitiveType                 return_type          = PrimitiveType::VOID;
+  bool                          returns_void_pointer = false;
+  std::vector<BuiltinParameter> parameters;
+};
+
+// `agc:write` and friends are parsed with a single colon so the built-in
+// namespace cannot collide with normal module paths, which use `::`.
+std::optional<std::string_view>
+builtin_name_from_token(const Token& token) {
+  if (token.token_name == TokenName::AG_IDENTIFIER)
+    return token.value;
+  return std::nullopt;
+}
 
 // Built-ins are not declared in the source file, so synthesize a normal
 // function entry for them.  User functions with the same name take precedence
@@ -208,33 +223,46 @@ make_void_pointer() {
 std::optional<FunctionEntry>
 make_builtin_entry(std::string_view name) {
   static const std::vector<BuiltinFunction> builtins = {
-      {"alloc", "__ag_alloc", PrimitiveType::STRING, {PrimitiveType::INT}},
-      {"malloc", "__ag_alloc", PrimitiveType::STRING, {PrimitiveType::INT}},
-      {"free", "__ag_free", PrimitiveType::VOID, {PrimitiveType::STRING}},
-      {"dealloc", "__ag_free", PrimitiveType::VOID, {PrimitiveType::STRING}},
+      {"alloc", "__ag_alloc", PrimitiveType::STRING, true,
+       {{PrimitiveType::INT, false}}},
+      {"malloc", "__ag_alloc", PrimitiveType::STRING, true,
+       {{PrimitiveType::INT, false}}},
+      {"free", "__ag_free", PrimitiveType::VOID, false,
+       {{PrimitiveType::INT, true}}},
+      {"dealloc", "__ag_free", PrimitiveType::VOID, false,
+       {{PrimitiveType::INT, true}}},
+      {"write", "__ag_write", PrimitiveType::INT, false,
+       {{PrimitiveType::INT, true}, {PrimitiveType::INT, false}}},
+      {"read", "__ag_read", PrimitiveType::INT, false,
+       {{PrimitiveType::INT, true}, {PrimitiveType::INT, false}}},
+      {"exit", "__ag_exit", PrimitiveType::VOID, false,
+       {{PrimitiveType::INT, false}}},
+      {"memcpy", "__ag_memcpy", PrimitiveType::STRING, true,
+       {{PrimitiveType::INT, true}, {PrimitiveType::INT, true}, {PrimitiveType::INT, false}}},
+      {"strcpy", "__ag_strcpy", PrimitiveType::STRING, true,
+       {{PrimitiveType::INT, true}, {PrimitiveType::INT, true}}},
   };
 
   for (const auto& builtin : builtins) {
     if (builtin.name != name)
       continue;
 
-    const bool is_allocation = builtin.name == "alloc" || builtin.name == "malloc";
-
     FunctionEntry entry;
     entry.name        = std::string(builtin.name);
     entry.label       = std::string(builtin.label);
     entry.return_type = std::make_shared<DataType>();
     entry.return_type->primitive_type = builtin.return_type;
-    if (is_allocation)
+    if (builtin.returns_void_pointer)
       *entry.return_type = make_void_pointer();
     entry.is_defined = true;
     entry.is_public  = true;
 
-    for (const auto parameter_type : builtin.parameter_types) {
+    for (const auto& parameter_info : builtin.parameters) {
       FunctionParameter parameter;
-      parameter.type.primitive_type = parameter_type;
-      if (!is_allocation)
+      if (parameter_info.is_void_pointer)
         parameter.type = make_void_pointer();
+      else
+        parameter.type.primitive_type = parameter_info.type;
       entry.parameters.push_back(std::move(parameter));
     }
 
@@ -268,11 +296,26 @@ resolve_operator_overload(Parser&                          parser,
                           const std::vector<DataType>&    argument_types) {
   OperatorResolution             result;
   std::vector<FunctionEntry>     matches;
+  std::vector<FunctionEntry>     candidates;
+  std::unordered_set<std::string> seen_labels;
+
+  const auto add_candidates = [&](const std::string& lookup_name) {
+    for (const auto& candidate : get_function_table().lookup_all(lookup_name)) {
+      if (seen_labels.insert(candidate.label).second)
+        candidates.push_back(candidate);
+    }
+  };
 
   const std::string resolved_name = parser.resolve_symbol_name(name);
-  auto              candidates    = get_function_table().lookup_all(resolved_name);
-  if (candidates.empty() && resolved_name != name)
-    candidates = get_function_table().lookup_all(name);
+  add_candidates(resolved_name);
+  if (resolved_name != name)
+    add_candidates(std::string(name));
+
+  // `import module;` (in any of its forms) also imports that module's public
+  // operator overloads.  Private operators stay hidden through the normal
+  // visibility check below.
+  for (const auto& module : get_module_table().imported_modules(parser.current_module_path()))
+    add_candidates(module + "::" + std::string(name));
 
   for (const auto& candidate : candidates) {
     if (!candidate.is_defined)
@@ -375,18 +418,38 @@ as_string_index_target(Expression* expression) {
   if (!index || index->bin_operator != BIN_OPERATOR::INDEXING || !index->operator_label.empty())
     return nullptr;
 
-  auto* object = dynamic_cast<PrimaryExpression*>(index->left.get());
-  if (!object || object->primary_type != PrimitiveType::IDENTIFIER)
-    return nullptr;
-
   // During semantic analysis the symbol table is available, but it is already
   // unwound while IR is generated.  The indexing node therefore caches whether
-  // it targets a string so code generation does not need to look the name up.
-  if (!index->is_string_index &&
-      index->left->get_data_type().primitive_type != PrimitiveType::STRING)
+  // it targets a byte address so code generation does not need to look the
+  // name up.  The indexed object may be a plain identifier or a member such as
+  // `str.ptr[index]`.
+  if (!index->is_string_index && !is_string_like_type(index->left->get_data_type()))
     return nullptr;
 
   return index;
+}
+
+bool
+is_pointer_like_type(const DataType& type) {
+  return type.kind == TypeKind::POINTER || is_string_like_type(type);
+}
+
+// Passing `buffer[2]` to a pointer parameter means "the address of byte 2",
+// not the value stored at byte 2.
+std::string
+generate_string_index_address(Expression*    expression,
+                              LabelCounters& counter,
+                              Parser&        parser) {
+  auto* index = as_string_index_target(expression);
+  if (!index)
+    return expression->generate_ir(counter, parser);
+
+  const auto object = index->left->generate_ir(counter, parser);
+  const auto offset = index->right->generate_ir(counter, parser);
+  const auto result = make_temp(counter, parser);
+  parser.add_instructios(AG_cscope<Binary>(
+      result, object, offset, BIN_OPERATOR::ADDITION, counter.function_index));
+  return result;
 }
 
 } // namespace
@@ -515,6 +578,29 @@ Expression::parse_pratt(Parser& parser,
   // Postfix operators bind tighter than every binary operator.  Calls,
   // indexing, and ++/-- are all handled here so they can be chained.
   while (true) {
+    // Built-ins use the unique `agc:` namespace.  Normal modules use `::`,
+    // so `agc:write(...)` cannot be confused with a user module path.
+    if (auto* primary = dynamic_cast<PrimaryExpression*>(left.get());
+        primary && primary->primary_type == PrimitiveType::IDENTIFIER &&
+        primary->get_value() == "agc" && parser.check(TokenName::AG_COLON)) {
+      const SourceLocation path_location = primary->location;
+      parser.advance(); // consume ':'
+
+      const auto builtin_name = builtin_name_from_token(parser.current_token());
+      if (!builtin_name) {
+        print_error(error::ExpectedFunctionName, parser);
+        return nullptr;
+      }
+
+      auto qualified      = AG_cscope<QualifiedNameExpression>();
+      qualified->path     = "agc:" + std::string(*builtin_name);
+      qualified->location = path_location;
+      parser.advance();
+
+      left = std::move(qualified);
+      continue;
+    }
+
     if (parser.check(TokenName::AG_DOUBLE_COLON)) {
       std::string    first_segment;
       SourceLocation path_location;
@@ -641,7 +727,10 @@ PrimaryExpression::parse_primary(Parser& parser) {
   }
 
   TokenName temp_token;
-  if (!parser.check_one_of({TokenName::AG_STRING_LITERAL, TokenName::AG_INT_LITERAL, TokenName::AG_IDENTIFIER},
+  if (!parser.check_one_of({TokenName::AG_STRING_LITERAL,
+                            TokenName::AG_CHAR_LITERAL,
+                            TokenName::AG_INT_LITERAL,
+                            TokenName::AG_IDENTIFIER},
                            &temp_token)) {
     return nullptr;
   }
@@ -651,6 +740,9 @@ PrimaryExpression::parse_primary(Parser& parser) {
     primary_exp->primary_type = PrimitiveType::STRING;
     primary_exp->value        = parser.current_token().value;
     primary_exp->index        = Add_Literals::add_string_literals(primary_exp->value);
+  } else if (temp_token == TokenName::AG_CHAR_LITERAL) {
+    primary_exp->primary_type = PrimitiveType::CHAR;
+    primary_exp->value        = parser.current_token().value;
   } else if (temp_token == TokenName::AG_INT_LITERAL) {
     primary_exp->primary_type = PrimitiveType::INT;
     primary_exp->value        = parser.current_token().value;
@@ -1033,10 +1125,20 @@ CallExpression::analyze_semantics(Parser&               parser,
   const auto& diagnostic_location = this->source_location(location);
 
   m_is_method = false;
+  m_address_arguments.clear();
   std::vector<FunctionEntry> candidates;
   std::optional<DataType>    receiver_argument_type;
 
-  if (auto* member_callee = dynamic_cast<MemberExpression*>(callee.get())) {
+  if (auto* qualified = dynamic_cast<QualifiedNameExpression*>(callee.get());
+      qualified && qualified->path.rfind("agc:", 0) == 0) {
+    const std::string builtin_name = qualified->path.substr(4);
+    if (auto builtin = make_builtin_entry(builtin_name))
+      candidates.push_back(std::move(*builtin));
+    else {
+      print_error(error::UndefinedFunction, parser, diagnostic_location);
+      return false;
+    }
+  } else if (auto* member_callee = dynamic_cast<MemberExpression*>(callee.get())) {
     // `value.method(...)` resolves against methods registered for the
     // receiver's struct type.  The receiver is passed as the implicit first
     // argument.
@@ -1188,8 +1290,23 @@ CallExpression::analyze_semantics(Parser&               parser,
 
     bool compatible = true;
     for (size_t i = 0; i < argument_types.size() && i < candidate.parameters.size(); ++i) {
-      if (argument_types[i].primitive_type == PrimitiveType::UNEXPECTED ||
-          !is_compatible_type(candidate.parameters[i].type, argument_types[i])) {
+      Expression* argument_expression = nullptr;
+      if (m_is_method) {
+        if (i > 0 && i - 1 < arguments.size())
+          argument_expression = arguments[i - 1].get();
+      } else if (i < arguments.size()) {
+        argument_expression = arguments[i].get();
+      }
+
+      const bool address_argument
+          = argument_expression && as_string_index_target(argument_expression) != nullptr;
+      const bool pointer_parameter = is_pointer_like_type(candidate.parameters[i].type);
+      const bool compatible_argument
+          = argument_types[i].primitive_type != PrimitiveType::UNEXPECTED &&
+            (is_compatible_type(candidate.parameters[i].type, argument_types[i]) ||
+             (address_argument && pointer_parameter));
+
+      if (!compatible_argument) {
         compatible = false;
         if (!mismatching_argument)
           mismatching_argument = i;
@@ -1234,6 +1351,18 @@ CallExpression::analyze_semantics(Parser&               parser,
         !check_assignment_target_is_mutable(
             member_callee->object.get(), parser, diagnostic_location))
       return false;
+  }
+
+  m_address_arguments.assign(arguments.size(), false);
+  const size_t first_explicit = m_is_method ? 1 : 0;
+  for (size_t i = 0; i < arguments.size(); ++i) {
+    const size_t parameter_index = first_explicit + i;
+    if (parameter_index >= resolved->parameters.size())
+      continue;
+
+    if (is_pointer_like_type(resolved->parameters[parameter_index].type) &&
+        as_string_index_target(arguments[i].get()))
+      m_address_arguments[i] = true;
   }
 
   m_label               = resolved->label;
@@ -1291,8 +1420,13 @@ CallExpression::generate_ir(LabelCounters& counter,
 
   std::vector<std::string> argument_values;
   argument_values.reserve(arguments.size() + m_resolved_parameters.size());
-  for (const auto& argument : arguments)
-    argument_values.push_back(argument->generate_ir(counter, parser));
+  for (size_t i = 0; i < arguments.size(); ++i) {
+    if (i < m_address_arguments.size() && m_address_arguments[i])
+      argument_values.push_back(
+          generate_string_index_address(arguments[i].get(), counter, parser));
+    else
+      argument_values.push_back(arguments[i]->generate_ir(counter, parser));
+  }
 
   // Fill omitted trailing arguments with their declared defaults.  The
   // defaults are analyzed once at the declaration site, but evaluated here in
@@ -1831,13 +1965,14 @@ BinaryExpression::analyze_semantics(Parser&               parser,
   }
 
   if (bin_operator == BIN_OPERATOR::INDEXING) {
-    if (left_type.primitive_type == PrimitiveType::STRING &&
+    if (is_string_like_type(left_type) &&
         right_type.primitive_type != PrimitiveType::UNEXPECTED &&
         is_compatible_datatype(PrimitiveType::INT, right_type.primitive_type)) {
-      result_type                 = DataType{};
-      result_type.primitive_type  = PrimitiveType::INT;
-      result_type_known           = true;
-      is_string_index             = true;
+      result_type                = DataType{};
+      result_type.primitive_type = is_char_pointer_type(left_type) ? PrimitiveType::CHAR
+                                                                   : PrimitiveType::INT;
+      result_type_known          = true;
+      is_string_index            = true;
       return true;
     }
     print_error(error::InvalidOperandTypes, parser, diagnostic_location);

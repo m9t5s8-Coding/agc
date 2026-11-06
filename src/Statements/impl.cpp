@@ -74,7 +74,11 @@ ImplStatement::ParseImpl(Parser& parser) {
       return nullptr;
     }
 
-    const bool method_public = parser.match(TokenName::AG_PUB);
+    bool method_public = false;
+    if (parser.match(TokenName::AG_PUB))
+      method_public = true;
+    else if (parser.match(TokenName::AG_PRIV))
+      method_public = false;
     parser.set_pending_public(method_public);
 
     if (!parser.check(TokenName::AG_FUNC)) {

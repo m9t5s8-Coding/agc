@@ -41,8 +41,11 @@ StructStatement::ParseStruct(Parser& parser) {
     }
 
     StructMember member;
-    member.is_public = parser.match(TokenName::AG_PUB);
-    member.location  = {parser.current_token().line, parser.current_token().column};
+    if (parser.match(TokenName::AG_PUB))
+      member.is_public = true;
+    else if (parser.match(TokenName::AG_PRIV))
+      member.is_public = false;
+    member.location = {parser.current_token().line, parser.current_token().column};
 
     AG_EXPECT_GET_ID_OR_RETURN(
         parser, error::ExpectedFieldName, member.name, nullptr, TokenName::AG_IDENTIFIER);

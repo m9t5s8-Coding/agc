@@ -1,6 +1,7 @@
 #include "Statements/function.hpp"
 
 #include "Expressions/Expression.hpp"
+#include "Statements/ExpressionStatement.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/return.hpp"
 #include "IR/IR.hpp"
@@ -108,6 +109,23 @@ parse_return_type(Parser& parser) {
   }
 
   return type;
+}
+
+static bool
+is_void_return_type(const DataType& type) {
+  return type.kind == TypeKind::PRIMITIVE && type.primitive_type == PrimitiveType::VOID;
+}
+
+// `=> expr;` is a return for value-returning functions, but a void function
+// needs to evaluate the expression for its side effects instead.  This lets
+// setters read naturally: `func set_size(mut self, n: int) => self.size = n;`
+static AG_scope<Statements>
+make_expression_body(AG_scope<Expression> expression,
+                     const DataType&      return_type,
+                     SourceLocation       location) {
+  if (is_void_return_type(return_type))
+    return ExpressionStatement::Create(std::move(expression), location);
+  return ReturnStatement::Create(std::move(expression), location);
 }
 
 static std::string
@@ -255,7 +273,8 @@ FunctionStatement::ParseFunction(Parser& parser) {
                               nullptr,
                               TokenName::AG_ARROW,
                               TokenName::AG_LEFT_BRACE,
-                              TokenName::AG_SEMICOLON);
+                              TokenName::AG_SEMICOLON,
+                              TokenName::AG_FAT_ARROW);
 
     if (temp_token == TokenName::AG_ARROW) {
       parser.advance();
@@ -288,8 +307,8 @@ FunctionStatement::ParseFunction(Parser& parser) {
       AG_scope<Expression> expression;
       AG_PARSE_EXPRESSION_OR_RETURN(parser, expression, nullptr);
       AG_EXPECT_OR_RETURN(parser, TokenName::AG_SEMICOLON, error::ExpectedSemicolon, nullptr);
-      function_stmt->m_function_body
-          = ReturnStatement::Create(std::move(expression), function_stmt->m_location);
+      function_stmt->m_function_body = make_expression_body(
+          std::move(expression), function_stmt->m_return_type, function_stmt->m_location);
     }
   }
   return function_stmt;
@@ -364,7 +383,8 @@ FunctionStatement::ParseOperator(Parser& parser) {
                             nullptr,
                             TokenName::AG_ARROW,
                             TokenName::AG_LEFT_BRACE,
-                            TokenName::AG_SEMICOLON);
+                            TokenName::AG_SEMICOLON,
+                            TokenName::AG_FAT_ARROW);
 
   if (temp_token == TokenName::AG_ARROW) {
     parser.advance();
@@ -396,8 +416,8 @@ FunctionStatement::ParseOperator(Parser& parser) {
     AG_scope<Expression> expression;
     AG_PARSE_EXPRESSION_OR_RETURN(parser, expression, nullptr);
     AG_EXPECT_OR_RETURN(parser, TokenName::AG_SEMICOLON, error::ExpectedSemicolon, nullptr);
-    function_stmt->m_function_body
-        = ReturnStatement::Create(std::move(expression), function_stmt->m_location);
+    function_stmt->m_function_body = make_expression_body(
+        std::move(expression), function_stmt->m_return_type, function_stmt->m_location);
   }
 
   return function_stmt;

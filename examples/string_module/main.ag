@@ -1,0 +1,19 @@
+mod String;
+
+import String { String, construct };
+
+func main() -> int {
+  var str : String = construct(128);
+  var data : char* = "Hello World!\n";
+  str << data;
+
+  data = "Hello Mitesh!\n";
+  str << data;
+
+  str.print();
+  str.deallocate();
+  return 0;
+}
+
+
+

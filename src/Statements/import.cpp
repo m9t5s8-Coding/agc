@@ -72,6 +72,8 @@ ImportStatement::ParseImport(Parser& parser) {
   const std::string& scope         = parser.current_module_path();
   const std::string  resolved_path = resolve_import_path(parser, path);
 
+  get_module_table().add_imported_module(scope, resolved_path);
+
   if (parser.match(TokenName::AG_AS)) {
     if (!parser.check(TokenName::AG_IDENTIFIER)) {
       print_error(parser.is_at_end() ? error::UnexpectedEndOfFile : error::ExpectedAliasName,

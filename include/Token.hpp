@@ -14,6 +14,7 @@ enum class TokenName {
   AG_ENUM,
   AG_IMPL,
   AG_PUB,
+  AG_PRIV,
   AG_MUT,
   AG_IMPORT,
   AG_MOD,
@@ -94,10 +95,7 @@ enum class TokenName {
   AG_FAT_ARROW,
   AG_QUESTION,
 
-  AG_WRITE,
-  AG_READ,
   AG_RETURN,
-  AG_EXIT,
   AG_IF,
   AG_ELSE,
   AG_WHILE,

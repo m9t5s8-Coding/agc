@@ -379,6 +379,10 @@ private:
   std::string                    m_label;
   DataType                       m_result_type;
   std::vector<FunctionParameter> m_resolved_parameters;
+  // String-index arguments passed to pointer parameters use the address of
+  // the indexed byte (`buffer[2]` becomes `buffer + 2`) instead of loading the
+  // byte value.  This lets builtins such as memcpy/strcpy copy from an offset.
+  std::vector<bool>              m_address_arguments;
   bool                           m_is_method          = false;
   bool                           m_is_enum_constructor = false;
   std::string                    m_enum_name;

@@ -49,7 +49,8 @@ global_initializer(Expression* expression) {
     return "0";
 
   if (auto* primary = dynamic_cast<PrimaryExpression*>(expression)) {
-    if (primary->primary_type == PrimitiveType::INT)
+    if (primary->primary_type == PrimitiveType::INT ||
+        primary->primary_type == PrimitiveType::CHAR)
       return std::string(primary->value);
     if (primary->primary_type == PrimitiveType::STRING)
       return "str." + std::to_string(primary->index);
@@ -275,6 +276,37 @@ add_system_call_function(CodeGenContext& context) {
 
   context.syscall << std::format(
       "__ag_read:\n\tmov rdx, rsi\n\tmov rsi, rdi\n\tmov rdi, 0\n\tmov rax, 0\n\tsyscall\n\tret\n\n");
+
+  // Copy in 8-byte chunks and handle the trailing remainder byte-by-byte.
+  context.syscall << "__ag_memcpy:\n"
+                     "\tmov rax, rdi\n"
+                     "\tmov rcx, rdx\n"
+                     "\tshr rcx, 3\n"
+                     "\trep movsq\n"
+                     "\tmov rcx, rdx\n"
+                     "\tand rcx, 7\n"
+                     "\trep movsb\n"
+                     "\tret\n\n";
+
+  // Find the terminator first, then reuse the 8-byte copy path.
+  context.syscall << "__ag_strcpy:\n"
+                     "\tmov rax, rdi\n"
+                     "\tmov rdx, rsi\n"
+                     ".strcpy_find_end:\n"
+                     "\tcmp byte [rdx], 0\n"
+                     "\tje .strcpy_copy\n"
+                     "\tinc rdx\n"
+                     "\tjmp .strcpy_find_end\n"
+                     ".strcpy_copy:\n"
+                     "\tsub rdx, rsi\n"
+                     "\tinc rdx\n"
+                     "\tmov rcx, rdx\n"
+                     "\tshr rcx, 3\n"
+                     "\trep movsq\n"
+                     "\tmov rcx, rdx\n"
+                     "\tand rcx, 7\n"
+                     "\trep movsb\n"
+                     "\tret\n\n";
 
   // Heap allocation is backed by anonymous private mappings.  A 16-byte
   // header stores the requested size so free() does not need a second

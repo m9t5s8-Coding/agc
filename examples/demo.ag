@@ -3,13 +3,12 @@
 # This example only uses features that are implemented by the current
 # compiler.  It is intentionally self-contained and non-interactive.
 #
-# Build and run:
+# Build and run (LLVM backend):
 #   build/agc examples/demo.ag -o demo
 #   ./demo
 #
-# The same source also works with the LLVM backend:
-#   build/agc examples/demo.ag --llvm -o demo-llvm
-#   ./demo-llvm
+# Emit textual LLVM IR instead:
+#   build/agc examples/demo.ag --llvm-ir demo.ll
 
 # ---------------------------------------------------------------------------
 # Inline module + import

@@ -179,6 +179,37 @@ public:
     m_scopes[std::string(scope)].symbol_aliases[std::move(name)] = std::move(target);
   }
 
+  // Importing a module also makes that module's public operators available to
+  // operator-overload resolution in the importing scope.
+  void
+  add_imported_module(std::string_view scope,
+                      std::string      path) {
+    if (path.empty())
+      return;
+    m_scopes[std::string(scope)].imported_modules.insert(std::move(path));
+  }
+
+  std::vector<std::string>
+  imported_modules(std::string_view scope) const {
+    std::vector<std::string> result;
+    std::unordered_set<std::string> seen;
+
+    const auto append_scope = [&](std::string_view search_scope) {
+      const auto scope_it = m_scopes.find(std::string(search_scope));
+      if (scope_it == m_scopes.end())
+        return;
+      for (const auto& module : scope_it->second.imported_modules) {
+        if (seen.insert(module).second)
+          result.push_back(module);
+      }
+    };
+
+    append_scope(scope);
+    if (!scope.empty())
+      append_scope({});
+    return result;
+  }
+
   const std::string*
   find_module_alias(std::string_view scope,
                     std::string_view alias) const {
@@ -209,6 +240,7 @@ private:
   struct ScopeAliases {
     std::unordered_map<std::string, std::string> module_aliases;
     std::unordered_map<std::string, std::string> symbol_aliases;
+    std::unordered_set<std::string>              imported_modules;
   };
 
   std::unordered_map<std::string, ScopeAliases> m_scopes;
@@ -487,6 +519,12 @@ get_datatype_compatability(PrimitiveType data_types) {
 inline bool
 is_compatible_datatype(PrimitiveType type,
                        PrimitiveType pri_type) {
+  // `char` is an integer byte in AGC.  Treat it like the C family so byte
+  // literals, indexes, and arithmetic can be mixed without casts.
+  if ((type == PrimitiveType::CHAR && pri_type == PrimitiveType::INT) ||
+      (type == PrimitiveType::INT && pri_type == PrimitiveType::CHAR))
+    return true;
+
   auto is_compatible_for = get_datatype_compatability(type);
   auto token_2_datatype  = get_datatype_compatability(pri_type);
   return static_cast<DC_VALUE>(token_2_datatype) & static_cast<DC_VALUE>(is_compatible_for);
@@ -497,6 +535,21 @@ is_void_pointer_type(const DataType& type) {
   return type.kind == TypeKind::POINTER && type.pointee &&
          type.pointee->kind == TypeKind::PRIMITIVE &&
          type.pointee->primitive_type == PrimitiveType::VOID;
+}
+
+// `char*` is the C-style byte pointer.  `string` remains as a compatibility
+// spelling for the same pointer-sized byte address so existing code keeps
+// working while new library code can use `char*`.
+inline bool
+is_char_pointer_type(const DataType& type) {
+  return type.kind == TypeKind::POINTER && type.pointee &&
+         type.pointee->kind == TypeKind::PRIMITIVE &&
+         type.pointee->primitive_type == PrimitiveType::CHAR;
+}
+
+inline bool
+is_string_like_type(const DataType& type) {
+  return type.primitive_type == PrimitiveType::STRING || is_char_pointer_type(type);
 }
 
 inline bool
@@ -515,6 +568,11 @@ is_compatible_type(const DataType& expected,
     };
     return pointer_like(expected) && pointer_like(actual);
   }
+
+  // String literals, `string`, and `char*` are all byte addresses and can be
+  // assigned or passed to one another.
+  if (is_string_like_type(expected) && is_string_like_type(actual))
+    return true;
 
   if (expected.kind == TypeKind::POINTER || actual.kind == TypeKind::POINTER) {
     if (expected.kind != TypeKind::POINTER || actual.kind != TypeKind::POINTER)

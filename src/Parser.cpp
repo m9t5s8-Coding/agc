@@ -3,24 +3,22 @@
 #include "IR/IRTable.hpp"
 #include "LLVM/LLVMBackend.hpp"
 #include "IR/Instructions.hpp"
+#include "Expressions/Expression.hpp"
 #include "Statements/ExpressionStatement.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 #include "Statements/body.hpp"
 #include "Statements/enum.hpp"
-#include "Statements/exit.hpp"
 #include "Statements/function.hpp"
 #include "Statements/if.hpp"
 #include "Statements/impl.hpp"
 #include "Statements/import.hpp"
 #include "Statements/let.hpp"
 #include "Statements/module.hpp"
-#include "Statements/read.hpp"
 #include "Statements/return.hpp"
 #include "Statements/struct.hpp"
 #include "Statements/var.hpp"
 #include "Statements/while.hpp"
-#include "Statements/write.hpp"
 #include "SymbolTable.hpp"
 #include "Token.hpp"
 #include "error_msg.hpp"
@@ -191,8 +189,7 @@ Parser::parse_module_tokens(Lexer&                             lexer,
 
 void
 Parser::parse() {
-  LabelCounters  counter;
-  CodeGenContext context;
+  LabelCounters counter;
 
   m_ir_text.clear();
   m_assembly_text.clear();
@@ -238,9 +235,9 @@ Parser::parse() {
       ptr->generate_ir(counter, *this);
     }
 
-    // The generated `_start` always calls main, so a translation unit without
-    // it cannot produce a runnable program.  Report this at EOF instead of
-    // letting NASM/ld fail later with an unresolved symbol.
+    // The generated entry point always calls main, so a translation unit
+    // without it cannot produce a runnable program.  Report this at EOF
+    // instead of letting the linker fail later with an unresolved symbol.
     if (get_ir_table().find_function("main") == nullptr) {
       m_invalid_syntax = true;
       print_error(error::MissingMainFunction, *this);
@@ -253,30 +250,33 @@ Parser::parse() {
       m_ir_text += instr->to_string();
     }
 
-    // The LLVM backend is intentionally independent from the native NASM
-    // backend.  It translates the same linear IR, so both backends see
-    // identical program structure and semantics.
+    // LLVM is the executable backend.  It translates the same linear IR the
+    // native backend used to consume, so structs, members, and methods keep
+    // their existing lowering.
     if (m_emit_llvm)
       m_llvm_text = generate_llvm_ir(*this);
 
-    for (const auto& instr : m_instructions) {
-      instr->generate_code(context);
+    // Native NASM generation is kept only for the JSON debug output.  It is
+    // not part of executable builds anymore.
+    if (m_emit_native_assembly) {
+      CodeGenContext context;
+      for (const auto& instr : m_instructions) {
+        instr->generate_code(context);
+      }
+
+      add_system_call_function(context);
+
+      std::stringstream ss;
+      ss << "section .data\n"
+         << context.data.str() << "\n\n"
+         << "section .text\n"
+         << "global _start\n\n"
+         << context.syscall.str() << context.text.str();
+      m_assembly_text = ss.str();
     }
   }
 
-  add_system_call_function(context);
-
-  std::stringstream ss;
-  {
-    ss << "section .data\n"
-       << context.data.str() << "\n\n"
-       << "section .text\n"
-       << "global _start\n\n"
-       << context.syscall.str() << context.text.str();
-  }
-  m_assembly_text = ss.str();
-
-  // Backwards-compatible `agc file.ag -o text|json <file>` mode.
+  // Backwards-compatible `agc file.ag -o json <file>` mode.
   if (!m_output_file.empty() && m_output_format != OutputFormat::NONE) {
     std::ofstream outfile(m_output_file);
     if (!outfile.is_open()) {
@@ -309,15 +309,6 @@ Parser::parse_statement() {
   const auto& token = current_token();
 
   switch (token.token_name) {
-  case ag::TokenName::AG_EXIT: {
-    return ExitStatement::ParseExit(*this);
-  }
-  case TokenName::AG_WRITE: {
-    return WriteStatement::ParseWrite(*this);
-  }
-  case TokenName::AG_READ: {
-    return ReadStatement::ParseRead(*this);
-  }
   case TokenName::AG_LET: {
     return LetStatement::ParseLet(*this);
   }
@@ -346,6 +337,14 @@ Parser::parse_statement() {
     advance();
     const bool previous_public = m_pending_public;
     set_pending_public(true);
+    auto statement = parse_statement();
+    set_pending_public(previous_public);
+    return statement;
+  }
+  case TokenName::AG_PRIV: {
+    advance();
+    const bool previous_public = m_pending_public;
+    set_pending_public(false);
     auto statement = parse_statement();
     set_pending_public(previous_public);
     return statement;

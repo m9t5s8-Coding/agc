@@ -6,8 +6,8 @@ namespace ag {
 
 class Parser;
 
-// Translate the linear AGC IR into textual LLVM IR.  The result can be
-// compiled with clang/llc without changing the native NASM backend.
+// Translate the linear AGC IR into textual LLVM IR.  The result is compiled
+// with clang by the driver and is the default executable backend.
 std::string
 generate_llvm_ir(Parser& parser);
 

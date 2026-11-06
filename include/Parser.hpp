@@ -118,11 +118,18 @@ public:
     return m_llvm_text;
   }
 
-  // The LLVM backend is generated on demand so the native NASM path remains
-  // completely independent of it.
+  // LLVM is the executable backend.  Its textual IR is generated on demand
+  // for -o and --llvm-ir.
   void
   set_emit_llvm(bool enabled) {
     m_emit_llvm = enabled;
+  }
+
+  // Native NASM assembly is kept only for the JSON debug output.  Executable
+  // builds no longer run the native backend.
+  void
+  set_emit_native_assembly(bool enabled) {
+    m_emit_native_assembly = enabled;
   }
 
   // Linear IR instructions after the IR generation phase.  The LLVM backend
@@ -405,6 +412,7 @@ private:
   std::string  m_assembly_text;
   std::string  m_llvm_text;
   bool         m_emit_llvm = false;
+  bool         m_emit_native_assembly = false;
   OutputFormat m_output_format = OutputFormat::NONE;
 
   std::vector<DataType> m_function_return_types;

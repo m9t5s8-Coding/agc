@@ -6,6 +6,15 @@
 
 namespace ag {
 AG_scope<Statements>
+ExpressionStatement::Create(AG_scope<Expression> expression,
+                            SourceLocation      location) {
+  auto expr_statement        = AG_cscope<ExpressionStatement>();
+  expr_statement->m_location = location;
+  expr_statement->m_expression = std::move(expression);
+  return expr_statement;
+}
+
+AG_scope<Statements>
 ExpressionStatement::parse_expression_statement(Parser& parser) {
   auto expr_statement = AG_cscope<ExpressionStatement>();
   expr_statement->m_location = {parser.current_token().line, parser.current_token().column};

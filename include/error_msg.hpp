@@ -73,8 +73,8 @@ inline constexpr std::string_view ExpectedQuestionMark    = "\"Expected: '?'\"";
 inline constexpr std::string_view ExpectedAt              = "\"Expected: '@'\"";
 inline constexpr std::string_view ExpectedHash            = "\"Expected: '#'\"";
 inline constexpr std::string_view ExpectedUnderscore      = "\"Expected: '_'\"";
-inline constexpr std::string_view ExpectedAfterReturnType = "\"Expected '{' or ';' after return type\"";
-inline constexpr std::string_view ExpectedAfterParameters  = "\"Expected '->', '{' or ';' after parameter list\"";
+inline constexpr std::string_view ExpectedAfterReturnType = "\"Expected '{', '=>' or ';' after return type\"";
+inline constexpr std::string_view ExpectedAfterParameters  = "\"Expected '->', '{', '=>' or ';' after parameter list\"";
 
 // ============================================================
 // Expected: grammar constructs

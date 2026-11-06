@@ -20,13 +20,13 @@ Lexer::contains(const std::string_view str_view,
       {"and", {TokenName::AG_LOGICAL_AND}},
       {"or", {TokenName::AG_LOGICAL_OR}},
       {"not", {TokenName::AG_LOGICAL_NOT}},
-      {"exit", {TokenName::AG_EXIT}},
       {"func", {TokenName::AG_FUNC}},
       {"operator", {TokenName::AG_OPERATOR}},
       {"struct", {TokenName::AG_STRUCT}},
       {"enum", {TokenName::AG_ENUM}},
       {"impl", {TokenName::AG_IMPL}},
       {"pub", {TokenName::AG_PUB}},
+      {"priv", {TokenName::AG_PRIV}},
       {"mut", {TokenName::AG_MUT}},
       {"import", {TokenName::AG_IMPORT}},
       {"mod", {TokenName::AG_MOD}},
@@ -35,8 +35,6 @@ Lexer::contains(const std::string_view str_view,
       {"true", {TokenName::AG_INT_LITERAL, "1"}},
       {"false", {TokenName::AG_INT_LITERAL, "0"}},
       {"return", {TokenName::AG_RETURN}},
-      {"write", {TokenName::AG_WRITE}},
-      {"read", {TokenName::AG_READ}},
       {"char", {TokenName::AG_KEYWORD, "char"}},
       {"int", {TokenName::AG_KEYWORD, "int"}},
       {"float", {TokenName::AG_KEYWORD, "float"}},
@@ -485,9 +483,114 @@ Lexer::create_string_literal() {
 
 void
 Lexer::create_char_literal() {
-  // auto is_ascii = [](const char c) {
-  //   return c >= 32 && c <= 126;
-  // };
+  // On entry m_index points at the first character after the opening quote.
+  // Leave m_index on the closing quote; tokenize() advances past it.
+  const uint32_t start_line   = m_current_line;
+  const uint32_t start_column = m_current_column > 0 ? m_current_column - 1 : 0;
+
+  const auto report = [&](const std::string_view message) {
+    const std::string line_text(get_line_text(start_line));
+    std::string       caret_prefix;
+    const size_t      prefix_size = std::min<size_t>(start_column, line_text.size());
+    for (size_t i = 0; i < prefix_size; ++i)
+      caret_prefix.push_back(line_text[i] == '\t' ? '\t' : ' ');
+    if (start_column > prefix_size)
+      caret_prefix.append(start_column - prefix_size, ' ');
+
+    m_error_message += std::format(
+        "{}:{}: {}\n   {}\n   {}^\n", m_filename, start_line, message, line_text, caret_prefix);
+  };
+
+  if (m_index >= code_size() || m_source_code[m_index] == '\n') {
+    report(error::UnterminatedChar);
+    m_decoded_strings.push_back("0");
+    add_token({TokenName::AG_CHAR_LITERAL, std::string_view(m_decoded_strings.back())});
+    return;
+  }
+
+  if (m_source_code[m_index] == '\'') {
+    report(error::EmptyCharLiteral);
+    m_decoded_strings.push_back("0");
+    add_token({TokenName::AG_CHAR_LITERAL, std::string_view(m_decoded_strings.back())});
+    return;
+  }
+
+  char decoded = 0;
+  if (m_source_code[m_index] == '\\') {
+    if (m_index + 1 >= code_size()) {
+      report(error::UnterminatedChar);
+      m_decoded_strings.push_back("0");
+      add_token({TokenName::AG_CHAR_LITERAL, std::string_view(m_decoded_strings.back())});
+      return;
+    }
+
+    const char escaped = m_source_code[m_index + 1];
+    switch (escaped) {
+    case 'n':
+      decoded = '\n';
+      break;
+    case 'r':
+      decoded = '\r';
+      break;
+    case 't':
+      decoded = '\t';
+      break;
+    case '0':
+      decoded = '\0';
+      break;
+    case 'a':
+      decoded = '\a';
+      break;
+    case 'b':
+      decoded = '\b';
+      break;
+    case 'f':
+      decoded = '\f';
+      break;
+    case 'v':
+      decoded = '\v';
+      break;
+    case '\\':
+      decoded = '\\';
+      break;
+    case '"':
+      decoded = '"';
+      break;
+    case '\'':
+      decoded = '\'';
+      break;
+    default:
+      report(error::UnrecognizedEscape);
+      decoded = escaped;
+      break;
+    }
+
+    m_index += 2;
+    m_current_column += 2;
+  } else {
+    decoded = m_source_code[m_index];
+    ++m_index;
+    ++m_current_column;
+  }
+
+  if (m_index >= code_size() || m_source_code[m_index] == '\n') {
+    report(error::UnterminatedChar);
+  } else if (m_source_code[m_index] != '\'') {
+    // Consume the rest of the malformed literal so the scanner resumes at a
+    // useful place, then report the length error.
+    while (m_index < code_size() && m_source_code[m_index] != '\'' &&
+           m_source_code[m_index] != '\n') {
+      ++m_index;
+      ++m_current_column;
+    }
+    report(error::CharLiteralTooLong);
+  }
+
+  // Store the numeric byte value.  PrimaryExpression uses this directly as
+  // the literal's IR value.
+  m_decoded_strings.push_back(
+      std::to_string(static_cast<unsigned char>(decoded)));
+  add_token({TokenName::AG_CHAR_LITERAL, std::string_view(m_decoded_strings.back())});
 }
 
 void

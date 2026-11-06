@@ -1,0 +1,47 @@
+pub func strlen(text: string) -> int {
+    var length: int = 0;
+    while (text[length] != 0) {
+        length = length + 1;
+    }
+    return length;
+}
+
+pub struct String {
+  size : int,
+  capacity : int,
+  ptr : string,
+}
+
+impl String {
+
+  pub func allocate(mut self, capacity : int) {
+    self.ptr = agc:alloc(capacity);
+    self.capacity = capacity;
+    self.size = 0;
+  }
+
+  pub func deallocate(mut self) {
+      agc:free(self.ptr);
+      self.capacity = 0;
+      self.size = 0;
+  }
+
+  pub func data(self) -> char* => self.ptr;
+  pub func size(self) -> int => self.size;
+
+  pub func print(self) -> void {
+    agc:write(self.ptr, self.size);
+  }
+
+}
+
+pub func construct(capacity : int) -> String {
+  var str : String = String{};
+  str.allocate(capacity);
+  return str;
+}
+
+pub operator (str : String) << (msg : char*) {
+  agc:strcpy(str.ptr[str.size], msg); 
+  str.size = str.size + strlen(msg);
+}
