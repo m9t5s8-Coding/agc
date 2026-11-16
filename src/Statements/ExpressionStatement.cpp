@@ -23,7 +23,12 @@ ExpressionStatement::parse_expression_statement(Parser& parser) {
     return nullptr;
   }
   expr_statement->m_expression = std::move(expr);
-  if (!parser.expect(TokenName::AG_SEMICOLON, error::ExpectedSemicolon)) {
+
+  // Block-like expressions (`match { ... }`, `loop { ... }`, struct literals)
+  // end at a closing brace and are self-terminating statements.
+  if (!parser.match(TokenName::AG_SEMICOLON) &&
+      parser.previous_token().token_name != TokenName::AG_RIGHT_BRACE) {
+    print_error(error::ExpectedSemicolon, parser);
     return nullptr;
   }
   return expr_statement;

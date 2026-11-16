@@ -62,11 +62,32 @@ struct DataType {
   bool is_volatile = false;
   bool is_signed   = true; // relevant for integer PrimitiveType
 
+  // Opaque generic parameter such as `T` in `Stack<T>`.  Erased generics are
+  // compatible with any concrete type so existing code can be instantiated
+  // implicitly until monomorphization exists.
+  bool is_generic_parameter = false;
+
+  // Reference types use `pointee` for the referenced type.  `is_const` above
+  // belongs to the binding/pointee qualifier used by `let` and `mut self`;
+  // this flag records whether the reference itself permits writes through it
+  // (`&mut T`).  Keeping the two separate is what lets a `let` binding hold a
+  // mutable reference: the binding cannot be rebound, but `ref = value` (and
+  // the explicit `*ref = value` form) writes through it.
+  bool is_mutable_reference = false;
+
   std::shared_ptr<DataType> pointee;
 
   std::optional<size_t> array_length; // nullopt = unsized, e.g. int[]
 
+  // A map literal's pointer type.  Iterating it walks key/value pairs rather
+  // than single elements.
+  bool                      is_map       = false;
+  std::shared_ptr<DataType> map_key_type;
+
   std::shared_ptr<DataType>              return_type;
+  // Element types of a tuple such as `(int, string)`.  Values use the same
+  // pointer-sized-slot representation as array literals.
+  std::vector<std::shared_ptr<DataType>> tuple_elements;
   std::vector<std::shared_ptr<DataType>> parameter_types;
   bool                                   is_variadic = false;
 
@@ -115,6 +136,34 @@ struct StructDefinition {
   }
 };
 
+// Named type aliases such as `type Meters = float;`.  Aliases are registered
+// during parsing so later declarations can use them in type positions.
+class TypeAliasTable {
+public:
+  bool
+  declare(std::string name,
+          DataType    type) {
+    if (name.empty() || m_aliases.contains(name))
+      return false;
+    m_aliases.emplace(std::move(name), std::move(type));
+    return true;
+  }
+
+  const DataType*
+  lookup(std::string_view name) const {
+    const auto alias = m_aliases.find(std::string(name));
+    return alias == m_aliases.end() ? nullptr : &alias->second;
+  }
+
+  void
+  reset() {
+    m_aliases.clear();
+  }
+
+private:
+  std::unordered_map<std::string, DataType> m_aliases;
+};
+
 // Translation-unit-wide registry of user-defined struct layouts.  Struct
 // declarations are parsed before the code that uses them, so the registry is
 // populated during parsing and consulted by both semantic analysis and code
@@ -159,6 +208,40 @@ public:
   bool
   has_module(std::string_view path) const {
     return m_modules.contains(std::string(path));
+  }
+
+  // A module can be split across several files.  `mod ag::String;` loads
+  // `ag/String.ag`, but its declarations still belong to the `ag` namespace.
+  // This maps the file-qualified spelling (`ag::String`) back to the namespace
+  // that owns the declarations (`ag`), so `import ag::String { String }` works
+  // as expected.
+  void
+  add_module_part(std::string path,
+                  std::string module_path) {
+    if (path.empty() || module_path.empty())
+      return;
+    m_module_parts[std::move(path)] = std::move(module_path);
+  }
+
+  const std::string*
+  find_module_part(std::string_view path) const {
+    const auto part_it = m_module_parts.find(std::string(path));
+    return part_it == m_module_parts.end() ? nullptr : &part_it->second;
+  }
+
+  // A module file may be loaded by more than one importer (for example both
+  // the user program and `lib/ag/io.ag` may write `mod ag::String;`).  Loading
+  // the same file twice would re-declare every function and fail, so the file
+  // is remembered here and parsed only once.
+  bool
+  is_module_file_loaded(std::string_view path) const {
+    return m_loaded_module_files.contains(std::string(path));
+  }
+
+  void
+  mark_module_file_loaded(std::string path) {
+    if (!path.empty())
+      m_loaded_module_files.insert(std::move(path));
   }
 
   void
@@ -234,6 +317,8 @@ public:
   reset() {
     m_scopes.clear();
     m_modules.clear();
+    m_module_parts.clear();
+    m_loaded_module_files.clear();
   }
 
 private:
@@ -245,6 +330,8 @@ private:
 
   std::unordered_map<std::string, ScopeAliases> m_scopes;
   std::unordered_set<std::string>               m_modules;
+  std::unordered_map<std::string, std::string>  m_module_parts;
+  std::unordered_set<std::string>               m_loaded_module_files;
 };
 
 [[nodiscard]]
@@ -254,6 +341,9 @@ get_module_table();
 [[nodiscard]]
 StructTable&
 get_struct_table();
+
+TypeAliasTable&
+get_type_alias_table();
 
 // Build the pointer-sized value type used for a struct in expressions and
 // stack slots.  Struct values are represented by the address of their
@@ -419,8 +509,16 @@ struct FunctionEntry {
   std::vector<FunctionParameter> parameters;
   bool                           is_variadic = false;
   bool                           is_defined  = false; // has a body, vs. just declared
+  // Declared inside an `extern "c"` block.  External functions use their exact
+  // C symbol as the IR label and may be called without an AGC definition; the
+  // linker resolves them against a library or object file.
+  bool                           is_extern   = false;
   bool                           is_used     = false;
   bool                           is_public   = false;
+  // Associated member functions have no implicit receiver and are called as
+  // `Type::name(...)`.  Module-level `static func` also records this flag, but
+  // it is only meaningful for functions owned by an `impl`.
+  bool                           is_static   = false;
 
   uint32_t       scope_id = 0; // scope the function body introduces
   SourceLocation location;
@@ -432,8 +530,8 @@ inline uint32_t
 get_type_size(const DataType& type) {
   // Struct values are pointers to their storage, so a struct variable occupies
   // one machine word even though the pointee layout may be much larger.
-  if (type.kind == TypeKind::POINTER || type.kind == TypeKind::STRUCT ||
-      type.kind == TypeKind::ENUM)
+  if (type.kind == TypeKind::POINTER || type.kind == TypeKind::REFERENCE ||
+      type.kind == TypeKind::STRUCT || type.kind == TypeKind::ENUM)
     return 8;
 
   if (type.size_in_bytes != 0)
@@ -441,6 +539,7 @@ get_type_size(const DataType& type) {
 
   switch (type.primitive_type) {
   case PrimitiveType::CHAR:
+  case PrimitiveType::BOOL:
     return 1;
   case PrimitiveType::FLOAT:
     return 4;
@@ -448,7 +547,6 @@ get_type_size(const DataType& type) {
     return 8;
   case PrimitiveType::INT:
   case PrimitiveType::STRING:
-  case PrimitiveType::BOOL:
   case PrimitiveType::USER_DEFINED:
     return 8;
   default:
@@ -462,9 +560,24 @@ get_datatypes(const std::string_view keyword) {
       {"int", PrimitiveType::INT},
       {"void", PrimitiveType::VOID},
       {"char", PrimitiveType::CHAR},
+      {"byte", PrimitiveType::CHAR},
       {"float", PrimitiveType::FLOAT},
+      {"double", PrimitiveType::DOUBLE},
       {"bool", PrimitiveType::BOOL},
       {"string", PrimitiveType::STRING},
+      // Fixed-width integer spellings.  They all keep the existing signed
+      // integer code-path (`PrimitiveType::INT`) but carry their storage width
+      // and signedness in the DataType so memory accesses can use the right
+      // machine type.  `int` itself remains a pointer-sized (8 byte) slot.
+      {"uint", PrimitiveType::INT},
+      {"u8", PrimitiveType::INT},
+      {"i8", PrimitiveType::INT},
+      {"u16", PrimitiveType::INT},
+      {"i16", PrimitiveType::INT},
+      {"u32", PrimitiveType::INT},
+      {"i32", PrimitiveType::INT},
+      {"u64", PrimitiveType::INT},
+      {"i64", PrimitiveType::INT},
   };
   for (const auto& [view, data_type] : m_datatype_map) {
     if (view == keyword) {
@@ -472,6 +585,83 @@ get_datatypes(const std::string_view keyword) {
     }
   }
   return PrimitiveType::USER_DEFINED;
+}
+
+// Fill in the storage width, alignment, and signedness for a built-in type
+// spelling.  `type.type_name` must already contain the spelling (or be empty
+// for a plain `int`, which keeps its historical 8-byte representation).
+inline void
+apply_builtin_type_properties(DataType& type) {
+  const std::string_view name = type.type_name;
+
+  auto set = [&](size_t size, bool is_signed) {
+    type.size_in_bytes = size;
+    type.alignment     = size;
+    type.is_signed     = is_signed;
+  };
+
+  if (name == "void") {
+    set(0, false);
+    return;
+  }
+  if (name == "bool") {
+    type.primitive_type = PrimitiveType::BOOL;
+    set(1, false);
+    return;
+  }
+  if (name == "char" || name == "byte") {
+    // `char`/`byte` keep the historical zero-extended byte behavior.
+    set(1, false);
+    return;
+  }
+  if (name == "i8") {
+    set(1, true);
+    return;
+  }
+  if (name == "u8") {
+    set(1, false);
+    return;
+  }
+  if (name == "i16") {
+    set(2, true);
+    return;
+  }
+  if (name == "u16") {
+    set(2, false);
+    return;
+  }
+  if (name == "uint" || name == "u32") {
+    set(4, false);
+    return;
+  }
+  if (name == "i32") {
+    set(4, true);
+    return;
+  }
+  if (name == "int" || name == "i64" || name == "u64" || name == "string") {
+    set(8, name != "u64");
+    return;
+  }
+  if (name == "float") {
+    set(4, true);
+    return;
+  }
+  if (name == "double") {
+    set(8, true);
+    return;
+  }
+}
+
+// Convenience constructor used by the lexer/parser for literal types and by
+// built-in type resolution.
+inline DataType
+make_builtin_type(std::string_view spelling) {
+  DataType type;
+  type.kind           = TypeKind::PRIMITIVE;
+  type.type_name      = spelling;
+  type.primitive_type = get_datatypes(spelling);
+  apply_builtin_type_properties(type);
+  return type;
 }
 //
 using DC_VALUE = uint16_t;
@@ -537,6 +727,14 @@ is_void_pointer_type(const DataType& type) {
          type.pointee->primitive_type == PrimitiveType::VOID;
 }
 
+// A type that carries an address: raw pointers, references, and the legacy
+// `string` spelling (a byte address).
+inline bool
+is_indirect_type(const DataType& type) {
+  return type.kind == TypeKind::POINTER || type.kind == TypeKind::REFERENCE ||
+         type.primitive_type == PrimitiveType::STRING;
+}
+
 // `char*` is the C-style byte pointer.  `string` remains as a compatibility
 // spelling for the same pointer-sized byte address so existing code keeps
 // working while new library code can use `char*`.
@@ -559,12 +757,15 @@ is_compatible_type(const DataType& expected,
       actual.primitive_type == PrimitiveType::UNEXPECTED)
     return false;
 
+  // Erased generic parameters accept any concrete type.
+  if (expected.is_generic_parameter || actual.is_generic_parameter)
+    return true;
+
   // `void*` is the untyped result of the allocation built-ins.  It converts
   // to and from any pointer, and `string` is represented as a byte pointer.
   if (is_void_pointer_type(expected) || is_void_pointer_type(actual)) {
     const auto pointer_like = [](const DataType& type) {
-      return type.kind == TypeKind::POINTER ||
-             type.primitive_type == PrimitiveType::STRING;
+      return is_indirect_type(type);
     };
     return pointer_like(expected) && pointer_like(actual);
   }
@@ -574,11 +775,25 @@ is_compatible_type(const DataType& expected,
   if (is_string_like_type(expected) && is_string_like_type(actual))
     return true;
 
-  if (expected.kind == TypeKind::POINTER || actual.kind == TypeKind::POINTER) {
-    if (expected.kind != TypeKind::POINTER || actual.kind != TypeKind::POINTER)
+  const bool expected_indirect = expected.kind == TypeKind::POINTER ||
+                                 expected.kind == TypeKind::REFERENCE;
+  const bool actual_indirect = actual.kind == TypeKind::POINTER ||
+                               actual.kind == TypeKind::REFERENCE;
+
+  if (expected_indirect || actual_indirect) {
+    if (!expected_indirect || !actual_indirect)
       return false;
     if (!expected.pointee || !actual.pointee)
       return !expected.pointee && !actual.pointee;
+
+    // A `&T` may read through either a shared reference or a mutable one.
+    // A `&mut T` needs mutable access; raw pointers are treated as capable of
+    // mutation because their safety checking is deliberately outside the type
+    // system for now.
+    if (expected.kind == TypeKind::REFERENCE && expected.is_mutable_reference &&
+        actual.kind == TypeKind::REFERENCE && !actual.is_mutable_reference)
+      return false;
+
     return is_compatible_type(*expected.pointee, *actual.pointee);
   }
 
@@ -604,6 +819,10 @@ inline std::string
 mangle_type_name(const DataType& type) {
   if (type.kind == TypeKind::POINTER && type.pointee)
     return mangle_type_name(*type.pointee) + "_ptr";
+
+  if (type.kind == TypeKind::REFERENCE && type.pointee)
+    return mangle_type_name(*type.pointee) +
+           (type.is_mutable_reference ? "_mutref" : "_ref");
 
   if (!type.type_name.empty()) {
     // Module-qualified type names contain `::`, which is not valid in an
@@ -652,6 +871,10 @@ inline std::string
 type_display_name(const DataType& type) {
   if (type.kind == TypeKind::POINTER && type.pointee)
     return type_display_name(*type.pointee) + "*";
+
+  if (type.kind == TypeKind::REFERENCE && type.pointee)
+    return std::string(type.is_mutable_reference ? "&mut " : "&") +
+           type_display_name(*type.pointee);
 
   if (!type.type_name.empty())
     return std::string(type.type_name);
@@ -716,11 +939,38 @@ print_error(const std::string_view error,
 std::optional<DataType>
 parse_type(Parser& parser);
 
+// Parse a generic parameter list such as `<T>`, `<T, U>` or
+// `<T, const N: int>`.  The parameters are not monomorphized yet; only their
+// names are returned so type positions can treat them as opaque types.
+std::optional<std::vector<std::string>>
+parse_generic_parameter_list(Parser& parser);
+
+// Consume a generic argument list such as `<int, string>` after a type name.
+bool
+skip_generic_arguments(Parser& parser);
+
+// Consume a `where T: Bound + Other` clause.  Bounds are accepted and
+// ignored until trait dispatch exists.
+bool
+skip_where_clause(Parser& parser);
+
 std::optional<std::string>
 parse_operator_symbol(Parser& parser);
 
 class LabelCounters;
 class CodeGenContext;
+
+// `static` locals keep their value between calls.  Emit a hidden module-level
+// slot for the value and, for non-constant initializers, a guard slot that
+// makes the initializer run exactly once.
+void
+generate_static_local(LabelCounters&         counter,
+                      Parser&                parser,
+                      std::string_view       name,
+                      const DataType&        type,
+                      Expression*            initializer,
+                      bool                   is_const);
+
 class Add_Literals {
 public:
   static size_t

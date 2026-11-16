@@ -1,6 +1,7 @@
 
 #include "Statements/body.hpp"
 
+#include "Statements/defer.hpp"
 #include "Statements/Statements.hpp"
 #include "Statements/Utils.hpp"
 // #include "SymbolTable.hpp"
@@ -40,9 +41,17 @@ BodyStatement::ParseBlock(Parser& parser) {
 void
 BodyStatement::generate_ir(LabelCounters& counter,
                            Parser&         parser) {
+  std::vector<DeferStatement*> deferred;
   for (const auto& stmt : m_statements) {
+    if (auto* defer = dynamic_cast<DeferStatement*>(stmt.get())) {
+      deferred.push_back(defer);
+      continue;
+    }
     stmt->generate_ir(counter, parser);
   }
+
+  for (auto it = deferred.rbegin(); it != deferred.rend(); ++it)
+    (*it)->generate_ir(counter, parser);
 }
 
 bool

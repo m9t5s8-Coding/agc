@@ -1,0 +1,256 @@
+# ag::io - C++ iostream-style output and input for AGC.
+#
+# Load it with:
+#
+#   mod ag::io;
+#   import ag::io { cout, cin, endl, println, readln };
+#
+# Then use it much like C++:
+#
+#   cout << "hello " << 42 << endl;
+#   var value: int;
+#   cin >> value;
+#
+# `cout` and `cin` are sentinel byte addresses.  The overloaded `<<` and `>>`
+# operators dispatch on the value type; `agc:write` performs the actual output.
+# Input reads a whole line into a persistent function-local static buffer.
+
+# ---------------------------------------------------------------------------
+# Sentinel stream objects
+# ---------------------------------------------------------------------------
+
+# The addresses themselves are never dereferenced.  They identify the stream
+# and keep the spelling `cout << value` familiar.
+pub const cout: char* = "";
+pub const cin: char* = "";
+
+# `cout << endl` writes a newline.  `flush` is a no-op marker: output is not
+# buffered, so there is nothing to flush.
+pub const endl: char = '\n';
+pub const flush: char = 0;
+
+# ---------------------------------------------------------------------------
+# Low-level output helpers
+# ---------------------------------------------------------------------------
+
+func io_strlen(text: char*) -> int {
+  var length: int = 0;
+  while (text[length] != 0) {
+    length = length + 1;
+  }
+  return length;
+}
+
+func io_write_text(text: char*) {
+  agc:write(text, io_strlen(text));
+  return;
+}
+
+func io_write_text_err(text: char*) {
+  agc:write_err(text, io_strlen(text));
+  return;
+}
+
+func io_write_char(ch: char) {
+  # `flush` and similar markers use NUL.
+  if (ch == 0) {
+    return;
+  }
+  var buffer: char = ch;
+  agc:write(&buffer, 1);
+  return;
+}
+
+func io_write_char_err(ch: char) {
+  if (ch == 0) {
+    return;
+  }
+  var buffer: char = ch;
+  agc:write_err(&buffer, 1);
+  return;
+}
+
+func io_write_int(mut value: int) {
+  if (value < 0) {
+    io_write_char('-');
+    value = -value;
+  }
+  if (value >= 10) {
+    io_write_int(value / 10);
+  }
+  io_write_char('0' + value % 10);
+  return;
+}
+
+func io_write_int_err(mut value: int) {
+  if (value < 0) {
+    io_write_char_err('-');
+    value = -value;
+  }
+  if (value >= 10) {
+    io_write_int_err(value / 10);
+  }
+  io_write_char_err('0' + value % 10);
+  return;
+}
+
+# ---------------------------------------------------------------------------
+# Output operators
+# ---------------------------------------------------------------------------
+
+pub operator (out: char*) << (text: char*) -> char* {
+  io_write_text(text);
+  return out;
+}
+
+pub operator (out: char*) << (value: int) -> char* {
+  io_write_int(value);
+  return out;
+}
+
+pub operator (out: char*) << (value: char) -> char* {
+  io_write_char(value);
+  return out;
+}
+
+pub operator (out: char*) << (value: bool) -> char* {
+  if (value) {
+    io_write_text("true");
+  } else {
+    io_write_text("false");
+  }
+  return out;
+}
+
+# ---------------------------------------------------------------------------
+# Input support
+# ---------------------------------------------------------------------------
+
+# Read one line (without the trailing newline) into persistent storage.  The
+# returned pointer is valid until the next input operation.  Embedded NUL
+# bytes are not supported, matching the rest of the text APIs.
+func io_read_line() -> char* {
+  static var buffer: char* = agc:alloc(1024);
+
+  var index: int = 0;
+  var done: int = 0;
+  while (index < 1023 && done == 0) {
+    var ch: char = 0;
+    var count: int = agc:read(&ch, 1);
+    if (count <= 0) {
+      done = 1;
+    } else if (ch == '\n') {
+      done = 1;
+    } else if (ch != '\r') {
+      buffer[index] = ch;
+      index = index + 1;
+    }
+  }
+  buffer[index] = 0;
+  return buffer;
+}
+
+func io_parse_int(text: char*) -> int {
+  var index: int = 0;
+  while (text[index] == ' ' || text[index] == '\t') {
+    index = index + 1;
+  }
+
+  var sign: int = 1;
+  if (text[index] == '-') {
+    sign = -1;
+    index = index + 1;
+  } else if (text[index] == '+') {
+    index = index + 1;
+  }
+
+  var value: int = 0;
+  while (text[index] >= '0' && text[index] <= '9') {
+    value = value * 10 + (text[index] - '0');
+    index = index + 1;
+  }
+  return value * sign;
+}
+
+pub operator (in: char*) >> (value: &mut int) -> char* {
+  let line: char* = io_read_line();
+  value = io_parse_int(line);
+  return in;
+}
+
+pub operator (in: char*) >> (value: &mut char*) -> char* {
+  value = io_read_line();
+  return in;
+}
+
+# ---------------------------------------------------------------------------
+# Convenience functions
+# ---------------------------------------------------------------------------
+
+pub func println() {
+  io_write_char('\n');
+  return;
+}
+
+pub func println(value: int) {
+  io_write_int(value);
+  io_write_char('\n');
+  return;
+}
+
+pub func println(value: char*) {
+  io_write_text(value);
+  io_write_char('\n');
+  return;
+}
+
+pub func println(value: char) {
+  io_write_char(value);
+  io_write_char('\n');
+  return;
+}
+
+pub func println(value: bool) {
+  if (value) {
+    io_write_text("true");
+  } else {
+    io_write_text("false");
+  }
+  io_write_char('\n');
+  return;
+}
+
+pub func eprintln(value: int) {
+  io_write_int_err(value);
+  io_write_char_err('\n');
+  return;
+}
+
+pub func eprintln(value: char*) {
+  io_write_text_err(value);
+  io_write_char_err('\n');
+  return;
+}
+
+pub func eprintln(value: char) {
+  io_write_char_err(value);
+  io_write_char_err('\n');
+  return;
+}
+
+pub func eprintln(value: bool) {
+  if (value) {
+    io_write_text_err("true");
+  } else {
+    io_write_text_err("false");
+  }
+  io_write_char_err('\n');
+  return;
+}
+
+pub func readln() -> char* => io_read_line();
+
+pub func readln(prompt: char*) -> char* {
+  io_write_text(prompt);
+  return io_read_line();
+}

@@ -9,10 +9,49 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace ag {
+namespace {
+std::string
+qualify_module_path(const Parser& parser, std::string_view path) {
+  const std::string& scope = parser.current_module_path();
+  if (scope.empty() || path == scope)
+    return std::string(path);
+
+  if (path.size() > scope.size() &&
+      path.compare(0, scope.size(), scope) == 0 &&
+      path.compare(scope.size(), 2, "::") == 0)
+    return std::string(path);
+
+  return scope + "::" + std::string(path);
+}
+
+std::optional<std::filesystem::path>
+find_module_file(const Parser& parser, const std::string& relative_path) {
+  const std::filesystem::path filename(relative_path);
+  const std::filesystem::path current_file(parser.get_filename());
+
+  std::vector<std::filesystem::path> candidates;
+  candidates.push_back(current_file.parent_path() / filename);
+  for (const auto& include_path : parser.include_paths())
+    candidates.push_back(std::filesystem::path(include_path) / filename);
+  candidates.emplace_back(filename);
+
+  std::error_code error;
+  for (const auto& candidate : candidates) {
+    if (std::filesystem::is_regular_file(candidate, error) && !error)
+      return candidate;
+    error.clear();
+  }
+  return std::nullopt;
+}
+} // namespace
+
 ModuleStatement::~ModuleStatement() = default;
 
 AG_scope<Statements>
@@ -24,19 +63,82 @@ ModuleStatement::ParseModule(Parser& parser) {
   auto module_stmt        = AG_cscope<ModuleStatement>();
   module_stmt->m_location = {module_token.line, module_token.column};
 
-  std::string name;
+  std::vector<std::string> components;
+  std::string              name;
   AG_EXPECT_GET_ID_OR_RETURN(
       parser, error::ExpectedModuleName, name, nullptr, TokenName::AG_IDENTIFIER);
+  components.push_back(name);
 
-  module_stmt->m_path = parser.qualify_name(name);
+  std::string requested_path = name;
+  while (parser.match(TokenName::AG_DOUBLE_COLON)) {
+    if (!parser.check(TokenName::AG_IDENTIFIER)) {
+      print_error(parser.is_at_end() ? error::UnexpectedEndOfFile : error::ExpectedModuleName,
+                  parser);
+      return nullptr;
+    }
+    name = parser.current_token().value;
+    parser.advance();
+    components.push_back(name);
+    requested_path += "::";
+    requested_path += name;
+  }
+
+  // `mod ag::String;` is a file part of the `ag` namespace: it loads
+  // `ag/String.ag`, but declarations inside it are named `ag::Foo`, not
+  // `ag::String::Foo`.  Inline `mod ag::String { ... }` keeps the normal
+  // nested-module meaning.
+  const bool  is_inline_module = parser.check(TokenName::AG_LEFT_BRACE);
+  std::string module_file_name;
+  if (components.size() > 1 && !is_inline_module) {
+    std::string parent_path;
+    for (size_t i = 0; i + 1 < components.size(); ++i) {
+      if (!parent_path.empty())
+        parent_path += "::";
+      parent_path += components[i];
+    }
+
+    module_stmt->m_path = qualify_module_path(parser, parent_path);
+
+    for (size_t i = 0; i < components.size(); ++i) {
+      if (i != 0)
+        module_file_name += "/";
+      module_file_name += components[i];
+    }
+    module_file_name += ".ag";
+
+    get_module_table().add_module_part(qualify_module_path(parser, requested_path),
+                                       module_stmt->m_path);
+  } else {
+    if (components.size() > 1)
+      module_stmt->m_path = qualify_module_path(parser, requested_path);
+    else
+      module_stmt->m_path = parser.qualify_name(requested_path);
+    module_file_name = name + ".ag";
+  }
+
   get_module_table().declare_module(module_stmt->m_path);
 
   if (parser.match(TokenName::AG_SEMICOLON)) {
-    const std::filesystem::path current_file(parser.get_filename());
-    const std::filesystem::path module_file =
-        current_file.parent_path() / (name + ".ag");
+    const auto module_file = find_module_file(parser, module_file_name);
+    if (!module_file) {
+      print_error("\"Could not open module file\"", parser, module_stmt->m_location);
+      return nullptr;
+    }
 
-    std::ifstream file(module_file, std::ios::binary);
+    // The same module file can legitimately be named by several importers.
+    // Parse it only once; later `mod` statements become empty.
+    std::error_code    canonical_error;
+    std::string        module_key = std::filesystem::weakly_canonical(*module_file,
+                                                              canonical_error)
+                                        .string();
+    if (canonical_error)
+      module_key = module_file->string();
+
+    if (get_module_table().is_module_file_loaded(module_key))
+      return module_stmt;
+    get_module_table().mark_module_file_loaded(std::move(module_key));
+
+    std::ifstream file(*module_file, std::ios::binary);
     if (!file.is_open()) {
       print_error("\"Could not open module file\"", parser, module_stmt->m_location);
       return nullptr;
@@ -48,7 +150,7 @@ ModuleStatement::ParseModule(Parser& parser) {
 
     module_stmt->m_lexer = std::make_unique<Lexer>();
     module_stmt->m_lexer->set_source_code(module_stmt->m_source);
-    module_stmt->m_lexer->set_filename(module_file.string());
+    module_stmt->m_lexer->set_filename(module_file->string());
     module_stmt->m_lexer->tokenize();
 
     parser.parse_module_tokens(*module_stmt->m_lexer,

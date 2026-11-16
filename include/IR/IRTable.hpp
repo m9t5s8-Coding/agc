@@ -28,6 +28,9 @@ struct VariableData {
   uint32_t    offset{};      // [rbp - offset]
   uint32_t    param_index{}; // register index when this is a parameter
   bool        is_parameter = false;
+  // Static locals live in a module-level slot instead of a stack frame.  The
+  // `name` field then holds the global's IR/assembly name.
+  bool        is_static = false;
 };
 
 struct FunctionData {
@@ -150,6 +153,29 @@ public:
 
     std::string ir_name = "v." + std::to_string(function->variables.size()) + "." + source_name;
     return allocate(*function, std::move(ir_name), std::move(source_name), size, is_parameter, param_index);
+  }
+
+  // Bind a local source name to persistent module-level storage.  The slot is
+  // recorded in the function's variable list so identifier lookup finds it,
+  // but it is not placed on the stack: `name` is the global's IR name.
+  std::shared_ptr<VariableData>
+  declare_static_local(int         index,
+                       std::string source_name,
+                       std::string global_name) {
+    auto* function = lookup(index);
+    if (!function || source_name.empty() || global_name.empty())
+      return nullptr;
+
+    if (auto existing = lookup_source(index, source_name))
+      return existing;
+
+    auto variable         = std::make_shared<VariableData>();
+    variable->name        = std::move(global_name);
+    variable->source_name = std::move(source_name);
+    variable->size        = kSlotAlignment;
+    variable->is_static   = true;
+    function->variables.push_back(variable);
+    return variable;
   }
 
   // Allocate a slot for a compiler-generated value (a temporary).  The caller

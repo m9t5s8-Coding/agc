@@ -1,0 +1,40 @@
+# Variadic parameters.  `func sum(values: int...)` receives an implicit count
+# followed by the packed arguments.  Call sites may list values directly or
+# spread an existing array with `...`.
+#
+# Build from the repository root with:
+#   build/agc examples/variadic/main.ag -I lib -o /tmp/ag_variadic
+#   /tmp/ag_variadic
+
+mod ag::io;
+
+import ag::io { println };
+
+func sum(values: int...) -> int {
+    var total = 0;
+    for value in values {
+        total += value;
+    }
+    return total;
+}
+
+func main() -> int {
+    if (sum() != 0) {
+        return 1;
+    }
+    if (sum(1) != 1) {
+        return 2;
+    }
+    if (sum(1, 2, 3, 4) != 10) {
+        return 3;
+    }
+
+    let nums = [5, 6, 7];
+    if (sum(...nums) != 18) {
+        return 4;
+    }
+
+    println(sum(10, 20, 30));
+    println("variadic ok");
+    return 0;
+}

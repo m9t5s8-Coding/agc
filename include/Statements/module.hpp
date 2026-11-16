@@ -12,6 +12,7 @@ class Parser;
 
 // mod geometry { ... }
 // mod geometry;
+// mod ag::String;  // loads ag/String.ag into the `ag` namespace
 class ModuleStatement : public Statements {
 public:
   virtual ~ModuleStatement();

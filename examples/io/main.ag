@@ -1,0 +1,42 @@
+# C++ iostream-style I/O with ag::io.
+#
+# Build from the repository root with:
+#   build/agc examples/io/main.ag -I lib -o /tmp/ag_io_demo
+#   printf 'AGC\n42\n' | /tmp/ag_io_demo
+#
+# `cout << value << endl` writes a value and a newline, while `cin >> value`
+# reads a line and parses it as an integer.  `readln()` returns the whole line.
+
+mod ag::io;
+
+import ag::io {
+  cout,
+  cin,
+  endl,
+  flush,
+  println,
+  eprintln,
+  readln
+};
+
+func main() -> int {
+  cout << "name? " << flush;
+  var name: char* = "";
+  cin >> name;
+  cout << "hello, " << name << endl;
+
+  cout << "number? " << flush;
+  var value: int = 0;
+  cin >> value;
+
+  println(value);
+  println(value + 1);
+  cout << value << " " << value * 2 << endl;
+
+  cout << "note? " << flush;
+  let note: char* = readln();
+  cout << "note: " << note << endl;
+
+  eprintln("io demo finished");
+  return 0;
+}

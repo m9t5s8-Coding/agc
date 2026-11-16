@@ -10,9 +10,6 @@
 #include <string>
 
 namespace ag {
-namespace {
-constexpr size_t kStructFieldSize = 8;
-}
 
 AG_scope<Statements>
 StructStatement::ParseStruct(Parser& parser) {
@@ -31,6 +28,16 @@ StructStatement::ParseStruct(Parser& parser) {
                              TokenName::AG_IDENTIFIER);
   struct_stmt->m_definition.name     = parser.qualify_name(raw_name);
   struct_stmt->m_definition.location = struct_stmt->m_location;
+
+  // Generic parameters are accepted but not monomorphized yet.  Registering
+  // their names lets field declarations use `T`, `T[]`, and similar forms.
+  const bool has_generic_parameters = parser.check(TokenName::AG_LESS);
+  if (has_generic_parameters) {
+    auto generic_parameters = parse_generic_parameter_list(parser);
+    if (!generic_parameters)
+      return nullptr;
+    parser.push_generic_parameters(std::move(*generic_parameters));
+  }
 
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_BRACE, error::ExpectedLeftBrace, nullptr);
 
@@ -62,8 +69,17 @@ StructStatement::ParseStruct(Parser& parser) {
       return nullptr;
     }
 
-    member.byte_offset = struct_stmt->m_definition.members.size() * kStructFieldSize;
+    const size_t field_size  = std::max<size_t>(1, get_type_size(member.type));
+    const size_t field_align = std::min<size_t>(field_size, 8);
+    size_t       offset      = struct_stmt->m_definition.members.empty()
+                                   ? 0
+                                   : struct_stmt->m_definition.size_in_bytes;
+    offset = (offset + field_align - 1) / field_align * field_align;
+    member.byte_offset = offset;
     struct_stmt->m_definition.members.push_back(std::move(member));
+    struct_stmt->m_definition.size_in_bytes = offset + field_size;
+    struct_stmt->m_definition.alignment
+        = std::max(struct_stmt->m_definition.alignment, field_align);
 
     if (parser.match(TokenName::AG_COMMA) || parser.match(TokenName::AG_SEMICOLON))
       continue;
@@ -75,16 +91,22 @@ StructStatement::ParseStruct(Parser& parser) {
 
   parser.advance(); // `}`
 
+  if (struct_stmt->m_definition.alignment == 0)
+    struct_stmt->m_definition.alignment = 1;
   struct_stmt->m_definition.size_in_bytes
-      = std::max<size_t>(kStructFieldSize,
-                         struct_stmt->m_definition.members.size() * kStructFieldSize);
-  struct_stmt->m_definition.alignment = kStructFieldSize;
+      = (struct_stmt->m_definition.size_in_bytes +
+         struct_stmt->m_definition.alignment - 1) /
+        struct_stmt->m_definition.alignment * struct_stmt->m_definition.alignment;
+  struct_stmt->m_definition.size_in_bytes
+      = std::max<size_t>(1, struct_stmt->m_definition.size_in_bytes);
 
   if (!get_struct_table().declare(struct_stmt->m_definition)) {
     print_error(error::RedefinitionOfType, parser, struct_stmt->m_location);
     return nullptr;
   }
 
+  if (has_generic_parameters)
+    parser.pop_generic_parameters();
   return struct_stmt;
 }
 

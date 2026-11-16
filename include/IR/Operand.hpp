@@ -17,11 +17,13 @@ inline std::string
 resolve_operand(int               function_index,
                 std::string_view  value) {
   if (auto variable = get_ir_table().lookup_data(function_index, value))
-    return std::format("qword [rbp - {}]", variable->offset);
+    return variable->is_static ? std::format("qword [{}]", variable->name)
+                               : std::format("qword [rbp - {}]", variable->offset);
 
   // Fallback for anything that still carries a raw source name.
   if (auto variable = get_ir_table().lookup_source(function_index, value))
-    return std::format("qword [rbp - {}]", variable->offset);
+    return variable->is_static ? std::format("qword [{}]", variable->name)
+                               : std::format("qword [rbp - {}]", variable->offset);
 
   // Module-level variables are addressed directly rather than through rbp.
   if (auto global = get_ir_table().lookup_global_data(value))
@@ -39,10 +41,12 @@ inline std::string
 resolve_destination(int              function_index,
                     std::string_view value) {
   if (auto variable = get_ir_table().lookup_data(function_index, value))
-    return std::format("qword [rbp - {}]", variable->offset);
+    return variable->is_static ? std::format("qword [{}]", variable->name)
+                               : std::format("qword [rbp - {}]", variable->offset);
 
   if (auto variable = get_ir_table().lookup_source(function_index, value))
-    return std::format("qword [rbp - {}]", variable->offset);
+    return variable->is_static ? std::format("qword [{}]", variable->name)
+                               : std::format("qword [rbp - {}]", variable->offset);
 
   if (auto global = get_ir_table().lookup_global_data(value))
     return std::format("qword [{}]", global->name);

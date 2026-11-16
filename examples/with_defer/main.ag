@@ -1,0 +1,44 @@
+# `with` scopes, `defer`, and explicit generic call arguments.
+#
+# Build from the repository root with:
+#   build/agc examples/with_defer/main.ag -I lib -o /tmp/ag_with_defer
+#   /tmp/ag_with_defer
+#
+# `with (let name = value) { ... }` declares the binding and runs the body in
+# an inner scope.  `defer` statements in a block run in reverse order when the
+# block exits normally.  Generic arguments such as `add<int>(...)` are erased.
+
+mod ag::io;
+
+import ag::io { println };
+
+func add<T>(a: T, b: T) -> T {
+    return a + b;
+}
+
+func trace(value: int) -> void {
+    println(value);
+}
+
+func main() -> int {
+    var total = 10;
+
+    with (let bonus = add<int>(total, 5)) {
+        if (bonus != 15) {
+            return 1;
+        }
+        total = bonus;
+    }
+    if (total != 15) {
+        return 2;
+    }
+
+    {
+        defer trace(1);
+        defer trace(2);
+        println(3);
+    }
+
+    println("with/defer ok");
+    return 0;
+}

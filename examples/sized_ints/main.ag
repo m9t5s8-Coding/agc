@@ -1,0 +1,80 @@
+# Fixed-width integers, `bool`, and `uint`.
+#
+# Build from the repository root with:
+#   build/agc examples/sized_ints/main.ag -o /tmp/ag_sized_ints
+#   /tmp/ag_sized_ints
+
+struct Small {
+    a: u8,
+    b: bool,
+    c: i16,
+    d: int,
+}
+
+func take_u8(value: u8) -> u8 => value;
+
+func main() -> int {
+    # Unsuffixed literals are `int`; `false` is `bool`; `0u` is `uint`.
+    let x = 0;
+    let flag = false;
+    let u = 0u;
+    if (x != 0) { return 1; }
+    if (flag) { return 2; }
+    if (u != 0) { return 3; }
+
+    # Explicit fixed-width declarations.
+    var a: u8 = 200u8;
+    let b: i8 = -5i8;
+    let c: u16 = 60000u16;
+    let d: i16 = -30000i16;
+    let e: u32 = 4000000000u32;
+    let f: i32 = -2000000000i32;
+    let g: u64 = 123456789u64;
+    let h: i64 = -123456789i64;
+    if (a != 200) { return 4; }
+    if (b != -5) { return 5; }
+    if (c != 60000) { return 6; }
+    if (d != -30000) { return 7; }
+    if (e != 4000000000) { return 8; }
+    if (f != -2000000000) { return 9; }
+    if (g != 123456789) { return 10; }
+    if (h != -123456789) { return 11; }
+
+    # Arrays pack by element width.
+    var bytes: u8[3] = [1u8, 2u8, 250u8];
+    var flags: bool[2] = [true, false];
+    var words: i16[2] = [1i16, -2i16];
+    if (bytes[2] != 250) { return 12; }
+    if (!flags[0]) { return 13; }
+    if (flags[1]) { return 14; }
+    if (words[1] != -2) { return 15; }
+
+    # Struct fields use natural size and alignment.
+    var small = Small { a: 255u8, b: true, c: -1234i16, d: 99 };
+    if (small.a != 255) { return 16; }
+    if (!small.b) { return 17; }
+    if (small.c != -1234) { return 18; }
+    if (small.d != 99) { return 19; }
+
+    # Assignment, arguments, and returns wrap to the declared width.
+    a = a + 100;                    # 300 wraps to 44
+    if (a != 44) { return 20; }
+    if (take_u8(300u16) != 44) { return 21; }
+
+    var signed: i8 = 127i8;
+    signed = signed + 1;            # wraps to -128
+    if (signed != -128) { return 22; }
+
+    # A typed null pointer.
+    let p: u8* = null;
+    if (p != null) { return 23; }
+
+    # Boolean literals work as match patterns.
+    let state = match flag {
+        true => 1,
+        false => 0,
+    };
+    if (state != 0) { return 24; }
+
+    return 0;
+}

@@ -8,6 +8,7 @@ class Parser;
 // import ag::io { println, readln };
 // import ag::math as m;
 // import ag::fs;
+// import ag::String { String, string_new };  // file part of module `ag`
 class ImportStatement : public Statements {
 public:
   virtual ~ImportStatement() {}

@@ -1,12 +1,14 @@
 #include "Lexer.hpp"
 #include "Parser.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include <unistd.h>
 
@@ -27,6 +29,11 @@ print_usage(std::ostream& output) {
             "  --llvm-ir [path] Write textual LLVM IR (stdout when path is omitted)\n"
             "  -ir [path]       Write textual AGC IR (stdout when path is omitted)\n"
             "  -json [path]     Write JSON result (stdout when path is omitted)\n"
+            "  -I <dir>         Add a module search path (repeatable)\n"
+            "  -L <dir>         Add a library search path (repeatable)\n"
+            "  -l <name>        Link a system library, e.g. -lGL or -lm (repeatable)\n"
+            "  --link-arg <arg> Pass one extra argument to the linker\n"
+            "  --parse-only     Parse without semantic analysis or code generation\n"
             "  -h, --help       Show this help\n"
             "\n"
             "Legacy forms:\n"
@@ -34,9 +41,11 @@ print_usage(std::ostream& output) {
             "\n"
             "Examples:\n"
             "  agc main.ag -o test\n"
+            "  agc main.ag -I lib -o test\n"
             "  agc main.ag --llvm-ir test.ll\n"
             "  agc main.ag -ir test.ir\n"
-            "  agc main.ag -json test.json\n";
+            "  agc main.ag -json test.json\n"
+            "  agc gl.ag -I lib -L /usr/lib -l glfw -l GL -o app\n";
 }
 
 EmitTarget
@@ -97,8 +106,9 @@ shell_quote(const std::string& value) {
 }
 
 bool
-build_executable(const std::string& llvm_ir,
-                 const std::string& output_path) {
+build_executable(const std::string&              llvm_ir,
+                 const std::string&              output_path,
+                 const std::vector<std::string>& link_arguments) {
   namespace fs = std::filesystem;
 
   std::error_code error;
@@ -126,8 +136,17 @@ build_executable(const std::string& llvm_ir,
 
   // clang accepts textual LLVM IR and links it against the C runtime, which
   // is where the LLVM backend's __ag_* helpers get calloc/write/read/exit.
-  const std::string compile_command = "clang -x ir -O0 -o " + shell_quote(output_path)
-                                      + " " + shell_quote(llvm_path.string());
+  std::string compile_command = "clang -x ir -O0 -o " + shell_quote(output_path)
+                                + " " + shell_quote(llvm_path.string());
+  // `-x ir` persists across inputs.  Reset the language before an object file
+  // or archive path so clang does not try to parse it as LLVM IR.
+  const bool has_link_input = std::any_of(
+      link_arguments.begin(), link_arguments.end(),
+      [](const std::string& argument) { return argument.empty() || argument.front() != '-'; });
+  if (has_link_input)
+    compile_command += " -x none";
+  for (const auto& argument : link_arguments)
+    compile_command += " " + shell_quote(argument);
 
   const bool compiled = std::system(compile_command.c_str()) == 0;
 
@@ -165,13 +184,16 @@ main(int   argc,
 
   const std::string input_file = first_argument;
 
-  EmitTarget  ir_target;
-  EmitTarget  json_target;
-  EmitTarget  llvm_ir_target;
-  std::string executable_path;
+  EmitTarget               ir_target;
+  EmitTarget               json_target;
+  EmitTarget               llvm_ir_target;
+  std::string              executable_path;
+  std::vector<std::string> include_paths;
+  std::vector<std::string> link_arguments;
 
   ag::OutputFormat legacy_format = ag::OutputFormat::NONE;
   std::string      legacy_output_file;
+  bool             parse_only = false;
 
   // Keep the old `agc <file> -o json <path>` interface working.  Native
   // assembly output (`-o text`) has been removed while LLVM is the active
@@ -208,9 +230,41 @@ main(int   argc,
         ir_target = parse_emit_target(index, argc, argv);
       } else if (argument == "-json" || argument == "--json") {
         json_target = parse_emit_target(index, argc, argv);
+      } else if (argument == "-I" || argument == "--include") {
+        if (index >= argc) {
+          std::cerr << "Error: " << argument << " requires a directory\n";
+          return EXIT_FAILURE;
+        }
+        include_paths.emplace_back(argv[index++]);
+      } else if (argument.rfind("-I", 0) == 0 && argument.size() > 2) {
+        include_paths.push_back(argument.substr(2));
+      } else if (argument == "--link-arg" || argument == "-link-arg") {
+        if (index >= argc) {
+          std::cerr << "Error: " << argument << " requires a value\n";
+          return EXIT_FAILURE;
+        }
+        link_arguments.emplace_back(argv[index++]);
+      } else if (argument == "-L" || argument == "--library-path") {
+        if (index >= argc) {
+          std::cerr << "Error: " << argument << " requires a directory\n";
+          return EXIT_FAILURE;
+        }
+        link_arguments.push_back("-L" + std::string(argv[index++]));
+      } else if (argument.rfind("-L", 0) == 0 && argument.size() > 2) {
+        link_arguments.push_back(argument);
+      } else if (argument == "-l" || argument == "--library") {
+        if (index >= argc) {
+          std::cerr << "Error: " << argument << " requires a library name\n";
+          return EXIT_FAILURE;
+        }
+        link_arguments.push_back("-l" + std::string(argv[index++]));
+      } else if (argument.rfind("-l", 0) == 0 && argument.size() > 2) {
+        link_arguments.push_back(argument);
       } else if (argument == "-asm" || argument == "--asm" || argument == "--emit-asm") {
         std::cerr << "Error: native assembly output has been removed; use --llvm-ir for LLVM IR\n";
         return EXIT_FAILURE;
+      } else if (argument == "--parse-only" || argument == "-parse-only") {
+        parse_only = true;
       } else if (argument == "-h" || argument == "--help") {
         print_usage(std::cout);
         return EXIT_SUCCESS;
@@ -222,7 +276,7 @@ main(int   argc,
     }
   }
 
-  if (!legacy_mode && !ir_target.enabled && !json_target.enabled
+  if (!legacy_mode && !parse_only && !ir_target.enabled && !json_target.enabled
       && !llvm_ir_target.enabled && executable_path.empty()) {
     print_usage(std::cerr);
     return EXIT_FAILURE;
@@ -252,11 +306,22 @@ main(int   argc,
   parser.set_output_file(legacy_output_file);
   parser.set_emit_llvm(!executable_path.empty() || llvm_ir_target.enabled);
   parser.set_emit_native_assembly(json_target.enabled || legacy_format == ag::OutputFormat::JSON);
+  for (const auto& include_path : include_paths)
+    parser.add_include_path(include_path);
   parser.set_lexer(lexer);
+  parser.set_parse_only(parse_only);
   parser.parse();
 
   if (legacy_mode)
     return EXIT_SUCCESS;
+
+  if (parse_only) {
+    if (!parser.is_syntax_valid()) {
+      std::cerr << parser.get_error_message();
+      return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+  }
 
   if (!parser.is_syntax_valid()) {
     std::cerr << parser.get_error_message();
@@ -275,7 +340,7 @@ main(int   argc,
 
   if (!executable_path.empty()) {
     if (parser.is_syntax_valid()) {
-      success = build_executable(parser.get_llvm_ir(), executable_path) && success;
+      success = build_executable(parser.get_llvm_ir(), executable_path, link_arguments) && success;
     } else {
       success = false;
     }

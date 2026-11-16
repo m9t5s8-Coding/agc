@@ -9,7 +9,14 @@
 #include "Statements/Utils.hpp"
 #include "Statements/body.hpp"
 #include "Statements/enum.hpp"
+#include "Statements/break.hpp"
+#include "Statements/continue.hpp"
+#include "Statements/defer.hpp"
+#include "Statements/for.hpp"
 #include "Statements/function.hpp"
+#include "Statements/guard.hpp"
+#include "Statements/loop.hpp"
+#include "Statements/with.hpp"
 #include "Statements/if.hpp"
 #include "Statements/impl.hpp"
 #include "Statements/import.hpp"
@@ -17,6 +24,8 @@
 #include "Statements/module.hpp"
 #include "Statements/return.hpp"
 #include "Statements/struct.hpp"
+#include "Statements/test.hpp"
+#include "Statements/type_alias.hpp"
 #include "Statements/var.hpp"
 #include "Statements/while.hpp"
 #include "SymbolTable.hpp"
@@ -68,6 +77,24 @@ looks_like_operator_declaration(const Parser& parser) {
   return parser.is_valid(offset) &&
          parser.peek_token(offset).token_name == TokenName::AG_COLON;
 }
+
+// File modules such as `ag/io.ag` are loaded with `mod ag::io;`, but their
+// declarations belong to the parent namespace (`ag`).  Rewrite the longest
+// registered module-part prefix so `ag::io::println` and `io::println` both
+// find `ag::println`.
+std::string
+rewrite_module_part_prefix(const std::string& path) {
+  size_t position = path.rfind("::");
+  while (position != std::string::npos) {
+    const std::string prefix = path.substr(0, position);
+    if (const auto* part = get_module_table().find_module_part(prefix))
+      return *part + path.substr(position);
+    if (position == 0)
+      break;
+    position = path.rfind("::", position - 1);
+  }
+  return path;
+}
 } // namespace
 
 std::string
@@ -110,7 +137,7 @@ Parser::resolve_symbol_name(std::string_view name) const {
   if (const auto* target = find_module_alias({}))
     return *target + (separator == std::string::npos ? std::string{} : raw.substr(separator));
 
-  return raw;
+  return rewrite_module_part_prefix(raw);
 }
 
 std::string
@@ -125,13 +152,25 @@ Parser::resolve_type_name(std::string_view name) const {
       return *target;
   }
 
-  if (const auto* target = get_module_table().find_module_alias(scope, first))
+  if (const auto* target = get_module_table().find_module_alias(scope, first)) {
+    // `import ag::String;` aliases the file part's spelling.  For a bare
+    // type name (`String`) the actual declaration is `ag::String`, not the
+    // owning namespace `ag`.
+    if (separator == std::string::npos) {
+      const std::string candidate = *target + "::" + raw;
+      if (get_struct_table().lookup(candidate) != nullptr ||
+          get_enum_table().lookup(candidate) != nullptr ||
+          get_type_alias_table().lookup(candidate) != nullptr)
+        return candidate;
+    }
     return *target + (separator == std::string::npos ? std::string{} : raw.substr(separator));
+  }
 
   if (!scope.empty()) {
     const std::string candidate = scope + "::" + raw;
     if (get_struct_table().lookup(candidate) != nullptr ||
-        get_enum_table().lookup(candidate) != nullptr)
+        get_enum_table().lookup(candidate) != nullptr ||
+        get_type_alias_table().lookup(candidate) != nullptr)
       return candidate;
   }
 
@@ -143,7 +182,7 @@ Parser::resolve_type_name(std::string_view name) const {
   if (const auto* target = get_module_table().find_module_alias({}, first))
     return *target + (separator == std::string::npos ? std::string{} : raw.substr(separator));
 
-  return raw;
+  return rewrite_module_part_prefix(raw);
 }
 
 void
@@ -220,7 +259,7 @@ Parser::parse() {
     }
   }
 
-  if (!m_invalid_syntax) {
+  if (!m_invalid_syntax && !m_parse_only) {
     for (const auto& ptr : m_statements) {
       if (!ptr->analyze_semantics(*this)) {
         m_invalid_syntax = true;
@@ -229,7 +268,7 @@ Parser::parse() {
     }
   }
 
-  if (!m_invalid_syntax) {
+  if (!m_invalid_syntax && !m_parse_only) {
     Add_Literals::add_to_instruction(counter, *this);
     for (const auto& ptr : m_statements) {
       ptr->generate_ir(counter, *this);
@@ -308,12 +347,42 @@ AG_scope<Statements>
 Parser::parse_statement() {
   const auto& token = current_token();
 
+  // `outer: for ...` and the other loop forms attach a label to the loop so
+  // `break outer`/`continue outer` can target it.
+  if (token.token_name == TokenName::AG_IDENTIFIER &&
+      peek_token().token_name == TokenName::AG_COLON) {
+    const auto next = peek_token(2).token_name;
+    if (next == TokenName::AG_FOR || next == TokenName::AG_WHILE ||
+        next == TokenName::AG_UNTIL || next == TokenName::AG_LOOP) {
+      const std::string label(token.value);
+      advance(); // label
+      advance(); // ':'
+      push_loop_label_name(label);
+      auto statement = parse_statement();
+      pop_loop_label_name();
+      if (statement)
+        statement->set_loop_label(label);
+      return statement;
+    }
+  }
+
+  // `spawn { ... }` starts a concurrent task.  With no scheduler yet the block
+  // runs synchronously as a normal block.
+  if (token.token_name == TokenName::AG_IDENTIFIER && token.value == "spawn" &&
+      peek_token().token_name == TokenName::AG_LEFT_BRACE) {
+    advance(); // `spawn`
+    return BodyStatement::ParseBlock(*this);
+  }
+
   switch (token.token_name) {
   case TokenName::AG_LET: {
     return LetStatement::ParseLet(*this);
   }
   case TokenName::AG_VAR: {
     return VarStatement::ParseVar(*this);
+  }
+  case TokenName::AG_CONST: {
+    return LetStatement::ParseConst(*this);
   }
   case TokenName::AG_FUNC: {
     return FunctionStatement::ParseFunction(*this);
@@ -326,6 +395,109 @@ Parser::parse_statement() {
   }
   case TokenName::AG_IMPL: {
     return ImplStatement::ParseImpl(*this);
+  }
+  case TokenName::AG_TYPE: {
+    return TypeAliasStatement::ParseType(*this);
+  }
+  case TokenName::AG_EXTERN: {
+    // `extern "c" { ... }` groups declarations that come from another
+    // language.  The ABI string is informational; the declarations inside are
+    // ordinary bodyless functions that keep their exact C symbol names.
+    advance();
+    if (check(TokenName::AG_STRING_LITERAL))
+      advance();
+    if (!check(TokenName::AG_LEFT_BRACE)) {
+      print_error(error::ExpectedLeftBrace, *this);
+      return nullptr;
+    }
+    const bool previous_extern = in_extern_block();
+    set_in_extern_block(true);
+    auto block = BodyStatement::ParseBlock(*this);
+    set_in_extern_block(previous_extern);
+    return block;
+  }
+  case TokenName::AG_AT: {
+    // Attributes such as `@inline` and `@deprecated("...")` are accepted and
+    // ignored for now; the decorated declaration is parsed normally.
+    advance(); // `@`
+    if (!check_one_of({TokenName::AG_IDENTIFIER, TokenName::AG_KEYWORD})) {
+      print_error(is_at_end() ? error::UnexpectedEndOfFile : error::ExpectedIdentifier,
+                  *this);
+      return nullptr;
+    }
+    advance(); // attribute name
+
+    if (match(TokenName::AG_LEFT_PAREN)) {
+      int depth = 1;
+      while (depth > 0 && !is_at_end()) {
+        if (check(TokenName::AG_LEFT_PAREN))
+          ++depth;
+        else if (check(TokenName::AG_RIGHT_PAREN))
+          --depth;
+        advance();
+      }
+      if (depth != 0) {
+        print_error(error::UnexpectedEndOfFile, *this);
+        return nullptr;
+      }
+    }
+
+    return parse_statement();
+  }
+  case TokenName::AG_COMPTIME: {
+    // Compile-time functions are ordinary functions for now; the marker is
+    // accepted and the declaration is parsed normally.
+    advance();
+    return parse_statement();
+  }
+  case TokenName::AG_TRAIT: {
+    // Traits are not dispatched yet.  Consume the declaration so files using
+    // `trait Name { ... }` keep parsing; `impl Trait for Type` is handled by
+    // the normal impl parser.
+    advance();
+    take_pending_public();
+    if (!check(TokenName::AG_IDENTIFIER)) {
+      print_error(is_at_end() ? error::UnexpectedEndOfFile : error::ExpectedInterfaceName,
+                  *this);
+      return nullptr;
+    }
+    advance();
+
+    if (match(TokenName::AG_LESS)) {
+      int depth = 1;
+      while (depth > 0 && !is_at_end()) {
+        if (check(TokenName::AG_LESS))
+          ++depth;
+        else if (check(TokenName::AG_GREATER))
+          --depth;
+        advance();
+      }
+      if (depth != 0) {
+        print_error(error::UnexpectedEndOfFile, *this);
+        return nullptr;
+      }
+    }
+
+    if (!check(TokenName::AG_LEFT_BRACE)) {
+      print_error(error::ExpectedLeftBrace, *this);
+      return nullptr;
+    }
+
+    int brace_depth = 0;
+    do {
+      if (is_at_end()) {
+        print_error(error::UnexpectedEndOfFile, *this);
+        return nullptr;
+      }
+      if (check(TokenName::AG_LEFT_BRACE))
+        ++brace_depth;
+      else if (check(TokenName::AG_RIGHT_BRACE))
+        --brace_depth;
+      advance();
+    } while (brace_depth > 0);
+
+    auto empty = AG_cscope<BodyStatement>();
+    return empty;
   }
   case TokenName::AG_IMPORT: {
     return ImportStatement::ParseImport(*this);
@@ -349,6 +521,14 @@ Parser::parse_statement() {
     set_pending_public(previous_public);
     return statement;
   }
+  case TokenName::AG_STATIC: {
+    advance();
+    const bool previous_static = m_pending_static;
+    set_pending_static(true);
+    auto statement = parse_statement();
+    set_pending_static(previous_static);
+    return statement;
+  }
   case TokenName::AG_OPERATOR: {
     if (looks_like_operator_declaration(*this))
       return FunctionStatement::ParseOperator(*this);
@@ -366,10 +546,94 @@ Parser::parse_statement() {
   case TokenName::AG_WHILE: {
     return WhileStatement::ParseWhile(*this);
   }
+  case TokenName::AG_UNTIL: {
+    return WhileStatement::ParseUntil(*this);
+  }
+  case TokenName::AG_GUARD: {
+    return GuardStatement::ParseGuard(*this);
+  }
+  case TokenName::AG_FOR: {
+    return ForStatement::ParseFor(*this);
+  }
+  case TokenName::AG_LOOP: {
+    return LoopStatement::ParseLoop(*this);
+  }
+  case TokenName::AG_BREAK: {
+    return BreakStatement::ParseBreak(*this);
+  }
+  case TokenName::AG_CONTINUE: {
+    return ContinueStatement::ParseContinue(*this);
+  }
+  case TokenName::AG_WITH: {
+    return WithStatement::ParseWith(*this);
+  }
+  case TokenName::AG_DEFER: {
+    return DeferStatement::ParseDefer(*this);
+  }
+  case TokenName::AG_ASYNC: {
+    // `async func ...` is parsed as an ordinary function; asynchronous
+    // execution is not implemented yet.
+    advance();
+    return parse_statement();
+  }
+  case TokenName::AG_UNSAFE: {
+    // `unsafe { ... }` is a normal block; the type system already permits
+    // raw pointer operations where they are used.
+    advance();
+    if (!check(TokenName::AG_LEFT_BRACE)) {
+      print_error(is_at_end() ? error::UnexpectedEndOfFile : error::ExpectedLeftBrace,
+                  *this);
+      return nullptr;
+    }
+    return BodyStatement::ParseBlock(*this);
+  }
+  case TokenName::AG_TEST: {
+    return TestStatement::ParseTest(*this);
+  }
   default:
     return ExpressionStatement::parse_expression_statement(*this);
   }
   return nullptr;
+}
+
+AG_scope<Expression>
+Parser::parse_inline_expression(std::string_view      source,
+                                const SourceLocation& location) {
+  m_embedded_sources.emplace_back(source);
+  const std::string& stored = m_embedded_sources.back();
+
+  Lexer nested;
+  nested.set_filename(get_filename());
+  nested.set_source_code(stored);
+  nested.tokenize();
+
+  TokensVector tokens = nested.get_tokens();
+  Token        eof;
+  eof.token_name = TokenName::AG_EOF;
+  eof.value      = {};
+  eof.line       = location.line;
+  eof.column     = location.column;
+  tokens.push_back(eof);
+
+  // Keep the lexer (and the decoded literal storage it owns) alive for the
+  // lifetime of the parser, then parse the fragment through the normal Pratt
+  // parser by temporarily swapping the active token stream.
+  m_embedded_lexers.push_back(std::move(nested));
+
+  TokensVector saved_tokens = std::move(m_tokens);
+  const size_t saved_index  = m_index;
+  const Token  saved_eof    = m_EOToken;
+
+  m_tokens   = std::move(tokens);
+  m_index    = 0;
+  m_EOToken  = eof;
+
+  AG_scope<Expression> expression = Expression::parse_pratt(*this, 0.0f);
+
+  m_tokens  = std::move(saved_tokens);
+  m_index   = saved_index;
+  m_EOToken = saved_eof;
+  return expression;
 }
 
 void

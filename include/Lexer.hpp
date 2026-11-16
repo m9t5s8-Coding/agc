@@ -93,7 +93,9 @@ private:
   bool
   scan_char(const char c);
   void
-  create_string_literal();
+  create_string_literal(bool raw     = false,
+                        bool fstring = false,
+                        bool triple  = false);
   void
   create_char_literal();
 

@@ -1,0 +1,195 @@
+# ag::String library demo.
+#
+# Build from the repository root with:
+#   build/agc examples/string_stl/main.ag -I lib -o /tmp/ag_string_demo
+#   /tmp/ag_string_demo
+#
+# The library lives in lib/ag/String.ag.  `mod ag::String;` loads only that
+# file, so other `ag` parts (for example a future `lib/ag/Vector.ag`) are not
+# compiled unless they are requested.  The public type is `ag::String`; the
+# imported names below let the rest of this file spell it as plain `String`.
+
+mod ag::String;
+
+import ag::String {
+  String,
+  string_new,
+  string_from,
+  string_from_char,
+  string_from_int,
+  string_to_int,
+  string_length
+};
+
+func say(text: char*) {
+  agc:write(text, string_length(text));
+  return;
+}
+
+func check(name: char*, condition: int) {
+  if (condition) {
+    say("ok: ");
+    say(name);
+    say("\n");
+  } else {
+    say("FAILED: ");
+    say(name);
+    say("\n");
+  }
+  return;
+}
+
+func main() -> int {
+  # Factories and basic mutation.
+  var text: String = string_from("Hello");
+  text.append(", ");
+  text += "AGC";
+  text.push('!');
+  text << "\n";
+
+  say("text = ");
+  text.print();
+
+  check("append/+=/push/<<", text == "Hello, AGC!\n");
+  check("operator[] read", text[0] == 'H');
+  check("front/back", text.front() == 'H' && text.back() == '\n');
+  check("find_char", text.find_char('G') == 8);
+  check("find", text.find("AGC") == 7);
+  check("find_from", text.find_from("G", 8) == 8);
+  check("find_from miss", text.find_from("A", 8) == -1);
+  check("find_from empty", text.find_from("", 0) == 0);
+  check("find_from empty past end", text.find_from("", 100) == -1);
+  check("rfind_char", text.rfind_char('l') == 3);
+  check("rfind", text.rfind("l") == 3);
+  check("contains", text.contains("AGC"));
+  check("starts_with", text.starts_with("Hello"));
+  check("ends_with", text.ends_with("!\n"));
+
+  # Substrings and concatenation.
+  var piece: String = text.substr(7, 3);
+  check("substr", piece == "AGC");
+  check("substr clamp", piece.substr(0, 100) == "AGC");
+
+  var joined: String = piece + "!";
+  check("String + char*", joined == "AGC!");
+
+  var prefixed: String = "prefix " + piece;
+  check("char* + String", prefixed == "prefix AGC");
+
+  var doubled: String = piece + piece;
+  check("String + String", doubled == "AGCAGC");
+
+  var char_concat: String = piece + '?';
+  char_concat += '!';
+  check("String + char / += char", char_concat == "AGC?!");
+
+  # Comparisons.
+  check("String == String", piece == piece);
+  check("String == char*", piece == "AGC");
+  check("char* == String", "AGC" == piece);
+  check("String != char*", piece != "B");
+  check("String < char*", piece < "B");
+  check("String > char*", piece > "A");
+  check("String <= String", piece <= piece);
+  check("String >= String", piece >= piece);
+  check("compare", piece.compare_cstr("AGC") == 0);
+
+  # Capacity, resize, clear, and deep copies.
+  var empty: String = string_new();
+  check("empty", empty.empty());
+  empty.append("x");
+  empty.clear();
+  check("clear", empty.empty());
+
+  var reserved: String = string_new();
+  reserved.reserve(100);
+  check("reserve", reserved.capacity() >= 100);
+
+  var long_text: String = string_new();
+  var grow_index: int = 0;
+  while (grow_index < 100) {
+    long_text.push('a');
+    grow_index = grow_index + 1;
+  }
+  check("growth", long_text.size() == 100 && long_text[99] == 'a');
+
+  var grown: String = string_from("ab");
+  grown.resize(4, 'x');
+  check("resize grow", grown == "abxx");
+
+  var shrunk: String = string_from("abc");
+  shrunk.resize(-5, 'x');
+  check("resize negative", shrunk.empty());
+
+  var edited: String = string_from("abc");
+  edited.insert(1, "XY");
+  check("insert", edited == "aXYbc");
+  edited.erase(1, 2);
+  check("erase", edited == "abc");
+  edited.replace(1, 1, "Z");
+  check("replace", edited == "aZc");
+  edited.pop_back();
+  check("pop_back", edited == "aZ");
+
+  var upper: String = string_from("aBcZ");
+  upper.to_upper();
+  check("to_upper", upper == "ABCZ");
+  upper.to_lower();
+  check("to_lower", upper == "abcz");
+
+  var copy: String = text.clone();
+  check("clone equal", copy == text);
+  copy.set(0, 'X');
+  check("clone independent", text[0] == 'H');
+
+  var assigned: String = string_from("old");
+  assigned.assign("new");
+  check("assign", assigned == "new");
+
+  # Integer conversion.
+  var number: String = string_from_int(-12345);
+  var zero: String = string_from_int(0);
+  var one_char: String = string_from_char('Z');
+  say("number = ");
+  number.print();
+  say("\n");
+  check("string_from_int", number == "-12345");
+  check("string_from_int zero", zero == "0");
+  check("string_from_char", one_char == "Z");
+  check("to_int", number.to_int() == -12345);
+  check("string_to_int", string_to_int("-12345") == -12345);
+  check("string_to_int plus", string_to_int("+42") == 42);
+
+  # Chained stream-style appends.
+  var chain: String = string_new();
+  chain << "a" << "b" << 'c';
+  check("chained <<", chain == "abc");
+
+  # Mutable single-byte access.
+  text.set(0, 'J');
+  check("set/at", text.at(0) == 'J');
+
+  # Explicit cleanup.  `clone()` is required when independent ownership is
+  # wanted; plain assignment aliases the same buffer.
+  text.deallocate();
+  piece.deallocate();
+  joined.deallocate();
+  prefixed.deallocate();
+  doubled.deallocate();
+  char_concat.deallocate();
+  empty.deallocate();
+  reserved.deallocate();
+  long_text.deallocate();
+  grown.deallocate();
+  shrunk.deallocate();
+  edited.deallocate();
+  upper.deallocate();
+  copy.deallocate();
+  assigned.deallocate();
+  number.deallocate();
+  zero.deallocate();
+  one_char.deallocate();
+  chain.deallocate();
+
+  return 0;
+}

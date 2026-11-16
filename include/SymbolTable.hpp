@@ -106,7 +106,11 @@ public:
     }
 
     // A prototype followed by a definition is valid.  Two definitions (or two
-    // prototypes) of the same signature are not.
+    // prototypes) of the same signature are not.  Identical `extern "c"`
+    // declarations may repeat: several modules can include the same library
+    // header without colliding.
+    if (existing->second.is_extern && entry.is_extern)
+      return true;
     if (existing->second.is_defined)
       return false;
     if (!entry.is_defined)

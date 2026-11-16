@@ -1,0 +1,43 @@
+# `orelse` and `??` fall back when the left value is zero (the current
+# representation of an absent Option/Result value).  `orelse return ...`
+# returns from the enclosing function instead.
+#
+# Build from the repository root with:
+#   build/agc examples/optional_ops/main.ag -I lib -o /tmp/ag_optional_ops
+#   /tmp/ag_optional_ops
+
+mod ag::io;
+
+import ag::io { println };
+
+func identity(value: int) -> int {
+    return value;
+}
+
+func withOrelse(value: int) -> int {
+    let result = identity(value) orelse return -1;
+    return result + 1;
+}
+
+func main() -> int {
+    if (withOrelse(0) != -1) {
+        return 1;
+    }
+    if (withOrelse(5) != 6) {
+        return 2;
+    }
+
+    let fallback = identity(0) ?? 7;
+    if (fallback != 7) {
+        return 3;
+    }
+
+    let present = identity(3) ?? 7;
+    if (present != 3) {
+        return 4;
+    }
+
+    println(fallback);
+    println("optional ops ok");
+    return 0;
+}

@@ -1,0 +1,68 @@
+# `for` loops over integer ranges and fixed-size arrays.
+#
+# Build from the repository root with:
+#   build/agc examples/for_loops/main.ag -I lib -o /tmp/ag_for_loops
+#   /tmp/ag_for_loops
+
+mod ag::io;
+
+import ag::io { println };
+
+func sumRange(start: int, end: int) -> int {
+    var total = 0;
+    for i in start..end {
+        total += i;
+    }
+    return total;
+}
+
+func main() -> int {
+    var sum = 0;
+    for i in 0..10 {
+        sum += i;
+    }
+    if (sum != 45) {
+        return 1;
+    }
+
+    sum = 0;
+    for i in 0..=10 {
+        sum += i;
+    }
+    if (sum != 55) {
+        return 2;
+    }
+
+    sum = 0;
+    for i in 0..100 by 5 {
+        sum += i;
+    }
+    if (sum != 950) {
+        return 3;
+    }
+
+    let values: int[4] = [10, 20, 30, 40];
+    sum = 0;
+    for item in values {
+        sum += item;
+    }
+    if (sum != 100) {
+        return 4;
+    }
+
+    sum = 0;
+    for index, item in values {
+        sum += item + index;
+    }
+    if (sum != 106) {
+        return 5;
+    }
+
+    if (sumRange(1, 5) != 10) {
+        return 6;
+    }
+
+    println(sumRange(1, 5));
+    println("for/range ok");
+    return 0;
+}

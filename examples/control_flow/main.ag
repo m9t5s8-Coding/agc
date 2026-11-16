@@ -1,0 +1,79 @@
+# `loop`, `break`, and `continue`.
+#
+# Build from the repository root with:
+#   build/agc examples/control_flow/main.ag -I lib -o /tmp/ag_control_flow
+#   /tmp/ag_control_flow
+
+mod ag::io;
+
+import ag::io { println };
+
+func main() -> int {
+    var count = 0;
+    loop {
+        count += 1;
+        if (count >= 5) {
+            break;
+        }
+    }
+    if (count != 5) {
+        return 1;
+    }
+
+    var total = 0;
+    var i = 0;
+    loop {
+        i += 1;
+        if (i > 10) {
+            break;
+        }
+        if (i % 2 == 0) {
+            continue;
+        }
+        total += i;
+    }
+    if (total != 25) {
+        return 2;
+    }
+
+    total = 0;
+    for n in 0..10 {
+        if (n % 2 == 0) {
+            continue;
+        }
+        total += n;
+    }
+    if (total != 25) {
+        return 3;
+    }
+
+    total = 0;
+    var j = 0;
+    while (j < 10) {
+        j += 1;
+        if (j % 2 == 0) {
+            continue;
+        }
+        total += j;
+    }
+    if (total != 25) {
+        return 4;
+    }
+
+    # `break` only exits the innermost loop.
+    total = 0;
+    for n in 0..5 {
+        for m in 0..5 {
+            if (m == 2) {
+                break;
+            }
+            total += 1;
+        }
+    }
+    if (total != 10) {
+        return 5;
+    }
+
+    println("control flow ok");
+    return 0;
+}

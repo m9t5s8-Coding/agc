@@ -30,11 +30,15 @@ struct RuntimeSignature {
 
 std::optional<RuntimeSignature>
 runtime_signature(std::string_view name) {
-  if (name == "__ag_alloc")
+  if (name == "__ag_alloc" || name == "__ag_strlen" ||
+      name == "__ag_int_to_string" || name == "__ag_char_to_string")
     return RuntimeSignature{false, 1};
-  if (name == "__ag_write" || name == "__ag_read" || name == "__ag_strcpy")
+  if (name == "__ag_write" || name == "__ag_write_err" ||
+      name == "__ag_read" || name == "__ag_strcpy" ||
+      name == "__ag_float_to_string" || name == "__ag_str_concat")
     return RuntimeSignature{false, 2};
-  if (name == "__ag_memcpy")
+  if (name == "__ag_memcpy" || name == "__ag_int_to_hex" ||
+      name == "__ag_pad_left" || name == "__ag_pad_right")
     return RuntimeSignature{false, 3};
   if (name == "__ag_free" || name == "__ag_exit")
     return RuntimeSignature{true, 1};
@@ -133,6 +137,12 @@ public:
         emit_param(param);
       } else if (auto* assign = dynamic_cast<Assign*>(instruction)) {
         emit_assign(assign);
+      } else if (auto* address_of = dynamic_cast<AddressOf*>(instruction)) {
+        emit_address_of(address_of);
+      } else if (auto* deref_load = dynamic_cast<DerefLoad*>(instruction)) {
+        emit_deref_load(deref_load);
+      } else if (auto* deref_store = dynamic_cast<DerefStore*>(instruction)) {
+        emit_deref_store(deref_store);
       } else if (auto* binary = dynamic_cast<Binary*>(instruction)) {
         emit_binary(binary);
       } else if (auto* index_assign = dynamic_cast<IndexAssign*>(instruction)) {
@@ -141,6 +151,8 @@ public:
         emit_member_load(member_load);
       } else if (auto* member_store = dynamic_cast<MemberStore*>(instruction)) {
         emit_member_store(member_store);
+      } else if (auto* narrow = dynamic_cast<Narrow*>(instruction)) {
+        emit_narrow(narrow);
       } else if (auto* condition = dynamic_cast<CondJump*>(instruction)) {
         emit_cond_jump(condition, instructions, i);
       } else if (auto* jump = dynamic_cast<Jump*>(instruction)) {
@@ -162,8 +174,11 @@ public:
 
 private:
   struct CallInfo {
-    bool   returns_void = false;
-    size_t argument_count = 0;
+    bool                     returns_void   = false;
+    size_t                   argument_count = 0;
+    bool                     is_extern      = false;
+    std::string              return_type    = "i64";
+    std::vector<std::string> parameter_types;
   };
 
   void
@@ -406,6 +421,11 @@ private:
 
     for (size_t i = 0; i < data->variables.size(); ++i) {
       const auto& variable = data->variables[i];
+
+      // Static locals are backed by module-level storage, not a stack slot.
+      if (variable->is_static)
+        continue;
+
       const std::string slot = "%slot" + std::to_string(i);
 
       m_slots[variable->name] = slot;
@@ -471,6 +491,25 @@ private:
   emit_assign(Assign* assign) {
     const std::string value = emit_value(assign->m_source);
     store_destination(assign->m_destination, value);
+  }
+
+  void
+  emit_narrow(Narrow* narrow) {
+    const std::string value = emit_value(narrow->m_value);
+    if (narrow->m_width >= 8) {
+      store_destination(narrow->m_destination, value);
+      return;
+    }
+
+    const std::string integer_type = llvm_integer_type(narrow->m_width);
+    const std::string truncated   = new_temp();
+    const std::string result      = new_temp();
+    m_output << "  " << truncated << " = trunc i64 " << value << " to "
+             << integer_type << "\n";
+    m_output << "  " << result << " = "
+             << (narrow->m_is_signed ? "sext " : "zext ") << integer_type
+             << ' ' << truncated << " to i64\n";
+    store_destination(narrow->m_destination, result);
   }
 
   void
@@ -595,7 +634,17 @@ private:
     m_output << "  " << base << " = inttoptr i64 " << object << " to ptr\n";
     m_output << "  " << address << " = getelementptr i8, ptr " << base
              << ", i64 " << member_load->m_byte_offset << "\n";
-    m_output << "  " << result << " = load i64, ptr " << address << ", align 8\n";
+    const std::string integer_type = llvm_integer_type(member_load->m_width);
+    if (integer_type != "i64") {
+      const std::string narrow = new_temp();
+      m_output << "  " << narrow << " = load " << integer_type << ", ptr " << address
+               << ", align " << member_load->m_width << "\n";
+      m_output << "  " << result << " = "
+               << (member_load->m_is_signed ? "sext " : "zext ") << integer_type
+               << ' ' << narrow << " to i64\n";
+    } else {
+      m_output << "  " << result << " = load i64, ptr " << address << ", align 8\n";
+    }
     store_destination(member_load->m_store_to, result);
   }
 
@@ -609,7 +658,100 @@ private:
     m_output << "  " << base << " = inttoptr i64 " << object << " to ptr\n";
     m_output << "  " << address << " = getelementptr i8, ptr " << base
              << ", i64 " << member_store->m_byte_offset << "\n";
-    m_output << "  store i64 " << value << ", ptr " << address << ", align 8\n";
+    const std::string integer_type = llvm_integer_type(member_store->m_width);
+    if (integer_type != "i64") {
+      const std::string narrow = new_temp();
+      m_output << "  " << narrow << " = trunc i64 " << value << " to "
+               << integer_type << "\n";
+      m_output << "  store " << integer_type << ' ' << narrow << ", ptr " << address
+               << ", align " << member_store->m_width << "\n";
+    } else {
+      m_output << "  store i64 " << value << ", ptr " << address << ", align 8\n";
+    }
+  }
+
+  void
+  emit_address_of(AddressOf* address_of) {
+    std::string source;
+    if (auto variable = get_ir_table().lookup_data(m_function_index, address_of->m_source)) {
+      auto slot = m_slots.find(variable->name);
+      if (slot != m_slots.end())
+        source = slot->second;
+    }
+    if (source.empty()) {
+      if (auto variable = get_ir_table().lookup_source(m_function_index, address_of->m_source)) {
+        auto slot = m_slots.find(variable->name);
+        if (slot != m_slots.end())
+          source = slot->second;
+      }
+    }
+    if (source.empty()) {
+      if (auto global = get_ir_table().lookup_global_data(address_of->m_source))
+        source = quote_llvm_name(global->name);
+      else if (auto global = get_ir_table().lookup_global_source(address_of->m_source))
+        source = quote_llvm_name(global->name);
+    }
+    if (source.empty()) {
+      source = "null";
+    }
+
+    const std::string result = new_temp();
+    m_output << "  " << result << " = ptrtoint ptr " << source << " to i64\n";
+    store_destination(address_of->m_store_to, result);
+  }
+
+  static std::string
+  llvm_integer_type(size_t width) {
+    switch (width) {
+    case 1:
+      return "i8";
+    case 2:
+      return "i16";
+    case 4:
+      return "i32";
+    default:
+      return "i64";
+    }
+  }
+
+  void
+  emit_deref_load(DerefLoad* deref_load) {
+    const std::string address = emit_value(deref_load->m_address);
+    const std::string base    = new_temp();
+    const std::string result  = new_temp();
+
+    m_output << "  " << base << " = inttoptr i64 " << address << " to ptr\n";
+    const std::string integer_type = llvm_integer_type(deref_load->m_width);
+    if (integer_type != "i64") {
+      const std::string narrow = new_temp();
+      m_output << "  " << narrow << " = load " << integer_type << ", ptr " << base
+               << ", align " << deref_load->m_width << "\n";
+      m_output << "  " << result << " = "
+               << (deref_load->m_is_signed ? "sext " : "zext ") << integer_type
+               << ' ' << narrow << " to i64\n";
+    } else {
+      m_output << "  " << result << " = load i64, ptr " << base << ", align 8\n";
+    }
+    store_destination(deref_load->m_store_to, result);
+  }
+
+  void
+  emit_deref_store(DerefStore* deref_store) {
+    const std::string address = emit_value(deref_store->m_address);
+    const std::string value   = emit_value(deref_store->m_value);
+    const std::string base    = new_temp();
+
+    m_output << "  " << base << " = inttoptr i64 " << address << " to ptr\n";
+    const std::string integer_type = llvm_integer_type(deref_store->m_width);
+    if (integer_type != "i64") {
+      const std::string narrow = new_temp();
+      m_output << "  " << narrow << " = trunc i64 " << value << " to "
+               << integer_type << "\n";
+      m_output << "  store " << integer_type << ' ' << narrow << ", ptr " << base
+               << ", align " << deref_store->m_width << "\n";
+    } else {
+      m_output << "  store i64 " << value << ", ptr " << base << ", align 8\n";
+    }
   }
 
   void
@@ -642,27 +784,185 @@ private:
     m_block_terminated = true;
   }
 
+  static std::string
+  llvm_extern_return_type(const DataType& type) {
+    // C functions commonly return a 32-bit `int` even though AGC's plain
+    // `int` is an i64 slot.  Explicitly sized spellings (`u8`, `i64`, ...)
+    // use their declared width instead.
+    return llvm_extern_type(type);
+  }
+
+  static bool
+  llvm_extern_is_unsigned(const DataType& type) {
+    if (type.kind != TypeKind::PRIMITIVE)
+      return false;
+    if (type.primitive_type == PrimitiveType::BOOL)
+      return true;
+    if (type.primitive_type == PrimitiveType::CHAR)
+      return false;
+    if (type.primitive_type != PrimitiveType::INT)
+      return false;
+    if (!type.is_signed)
+      return true;
+    return type.type_name == "uint" || type.type_name == "u8" ||
+           type.type_name == "u16" || type.type_name == "u32" ||
+           type.type_name == "u64";
+  }
+
+  static std::string
+  llvm_extern_type(const DataType& type) {
+    // External calls follow the platform C ABI.  AGC keeps every value in an
+    // i64 slot, so pointers are converted with inttoptr/ptrtoint and floats
+    // are converted at the call boundary.  Aggregates are pointer-backed in
+    // AGC and pass as pointers, not as by-value C structs.
+    if (type.kind == TypeKind::POINTER || type.kind == TypeKind::REFERENCE ||
+        type.kind == TypeKind::ARRAY || type.kind == TypeKind::STRUCT ||
+        type.kind == TypeKind::ENUM)
+      return "ptr";
+    if (type.primitive_type == PrimitiveType::STRING)
+      return "ptr";
+    if (type.primitive_type == PrimitiveType::VOID)
+      return "void";
+    if (type.primitive_type == PrimitiveType::FLOAT)
+      return "float";
+    if (type.primitive_type == PrimitiveType::DOUBLE)
+      return "double";
+    if (type.primitive_type == PrimitiveType::CHAR ||
+        type.primitive_type == PrimitiveType::BOOL)
+      return "i8";
+    if (type.primitive_type == PrimitiveType::INT) {
+      // Plain `int` keeps the historical C `int` mapping.  The new sized
+      // spellings carry their real width.
+      if (type.type_name.empty() || type.type_name == "int")
+        return "i32";
+      switch (type.size_in_bytes) {
+      case 1:
+        return "i8";
+      case 2:
+        return "i16";
+      case 4:
+        return "i32";
+      case 8:
+        return "i64";
+      default:
+        return "i32";
+      }
+    }
+    return "i64";
+  }
+
+  std::string
+  convert_argument_to(const std::string& type,
+                      const std::string& value) {
+    if (type == "ptr") {
+      const std::string converted = new_temp();
+      m_output << "  " << converted << " = inttoptr i64 " << value << " to ptr\n";
+      return converted;
+    }
+    if (type == "i32" || type == "i16" || type == "i8") {
+      const std::string converted = new_temp();
+      m_output << "  " << converted << " = trunc i64 " << value << " to " << type << "\n";
+      return converted;
+    }
+    if (type == "float") {
+      // AGC float literals and slots hold the IEEE-754 double bit pattern, so
+      // a C `float` parameter needs double -> float narrowing.
+      const std::string wide       = new_temp();
+      const std::string converted  = new_temp();
+      m_output << "  " << wide << " = bitcast i64 " << value << " to double\n";
+      m_output << "  " << converted << " = fptrunc double " << wide << " to float\n";
+      return converted;
+    }
+    if (type == "double") {
+      const std::string converted = new_temp();
+      m_output << "  " << converted << " = bitcast i64 " << value << " to double\n";
+      return converted;
+    }
+    return value;
+  }
+
+  std::string
+  convert_return_from(const std::string& type,
+                      const std::string& value,
+                      bool               is_unsigned = false) {
+    if (type == "ptr") {
+      const std::string converted = new_temp();
+      m_output << "  " << converted << " = ptrtoint ptr " << value << " to i64\n";
+      return converted;
+    }
+    if (type == "i32" || type == "i16" || type == "i8") {
+      const std::string converted = new_temp();
+      m_output << "  " << converted << " = " << (is_unsigned ? "zext " : "sext ")
+               << type << ' ' << value << " to i64\n";
+      return converted;
+    }
+    if (type == "float") {
+      const std::string wide      = new_temp();
+      const std::string converted = new_temp();
+      m_output << "  " << wide << " = fpext float " << value << " to double\n";
+      m_output << "  " << converted << " = bitcast double " << wide << " to i64\n";
+      return converted;
+    }
+    if (type == "double") {
+      const std::string converted = new_temp();
+      m_output << "  " << converted << " = bitcast double " << value << " to i64\n";
+      return converted;
+    }
+    return value;
+  }
+
   void
   emit_call(FunctionCall* call) {
     const std::string label = call->m_name;
 
-    bool function_returns_void = false;
+    bool        function_returns_void = false;
+    bool        is_extern             = false;
+    bool        return_is_unsigned    = false;
+    std::string return_type           = "i64";
+    std::vector<std::string> parameter_types;
 
     if (auto runtime = runtime_signature(label)) {
       function_returns_void = runtime->returns_void;
+      return_type           = function_returns_void ? "void" : "i64";
     } else {
       auto entry = get_function_table().lookup(label);
-      function_returns_void = entry && entry->return_type &&
-                              entry->return_type->primitive_type == PrimitiveType::VOID;
-      m_calls[label] = CallInfo{function_returns_void, m_params.size()};
+      if (entry) {
+        is_extern = entry->is_extern;
+        if (entry->return_type) {
+          if (is_extern) {
+            return_type = llvm_extern_return_type(*entry->return_type);
+            return_is_unsigned = llvm_extern_is_unsigned(*entry->return_type);
+            function_returns_void = (return_type == "void");
+          } else {
+            // AGC functions are always defined with i64 or void in this
+            // backend, regardless of their source-level return type.
+            function_returns_void =
+                entry->return_type->primitive_type == PrimitiveType::VOID;
+            return_type = function_returns_void ? "void" : "i64";
+          }
+        }
+        if (is_extern) {
+          for (const auto& parameter : entry->parameters)
+            parameter_types.push_back(llvm_extern_type(parameter.type));
+        }
+      }
+      CallInfo info;
+      info.returns_void   = function_returns_void;
+      info.argument_count = m_params.size();
+      info.is_extern      = is_extern;
+      info.return_type    = return_type;
+      info.parameter_types = parameter_types;
+      m_calls[label]      = std::move(info);
     }
 
     std::vector<std::string> arguments;
     arguments.reserve(m_params.size());
-    for (const auto& parameter : m_params)
-      arguments.push_back("i64 " + parameter);
+    for (size_t i = 0; i < m_params.size(); ++i) {
+      std::string argument_type = i < parameter_types.size() ? parameter_types[i] : "i64";
+      arguments.push_back(argument_type + " " + convert_argument_to(argument_type, m_params[i]));
+    }
 
-    const std::string result_type = function_returns_void ? "void" : "i64";
+    const std::string result_type = function_returns_void ? "void" : return_type;
     const std::string call_text
         = "  call " + result_type + " " + quote_llvm_name(label) + "("
           + join(arguments, ", ") + ")\n";
@@ -672,7 +972,8 @@ private:
       m_output << "  " << result << " = call " << result_type << ' '
                << quote_llvm_name(label) << "(" << join(arguments, ", ")
                << ")\n";
-      store_destination(call->m_result, result);
+      store_destination(call->m_result,
+                        convert_return_from(return_type, result, return_is_unsigned));
     } else {
       m_output << call_text;
     }
@@ -702,11 +1003,20 @@ private:
         continue;
 
       std::vector<std::string> parameters;
-      parameters.reserve(info.argument_count);
-      for (size_t i = 0; i < info.argument_count; ++i)
-        parameters.push_back("i64");
+      if (info.is_extern) {
+        parameters = info.parameter_types;
+        while (parameters.size() < info.argument_count)
+          parameters.push_back("i64");
+      } else {
+        parameters.reserve(info.argument_count);
+        for (size_t i = 0; i < info.argument_count; ++i)
+          parameters.push_back("i64");
+      }
 
-      m_output << "declare " << (info.returns_void ? "void" : "i64") << ' '
+      const std::string declaration_return
+          = info.is_extern ? info.return_type
+                           : (info.returns_void ? "void" : "i64");
+      m_output << "declare " << declaration_return << ' '
                << quote_llvm_name(label) << '(' << join(parameters, ", ")
                << ")\n";
       emitted = true;
@@ -720,9 +1030,12 @@ private:
   emit_runtime() {
     m_output << "declare ptr @calloc(i64, i64)\n"
                 "declare void @free(ptr)\n"
+                "declare i32 @snprintf(ptr, i64, ptr, ...)\n"
                 "declare i64 @write(i32, ptr, i64)\n"
                 "declare i64 @read(i32, ptr, i64)\n"
                 "declare void @exit(i32)\n"
+                "\n"
+                "@.ag_float_format = private unnamed_addr constant [5 x i8] c\"%.*f\\00\"\n"
                 "\n"
                 "define i64 @__ag_alloc(i64 %size) {\n"
                 "entry:\n"
@@ -742,6 +1055,13 @@ private:
                 "entry:\n"
                 "  %pointer = inttoptr i64 %address to ptr\n"
                 "  %written = call i64 @write(i32 1, ptr %pointer, i64 %length)\n"
+                "  ret i64 %written\n"
+                "}\n"
+                "\n"
+                "define i64 @__ag_write_err(i64 %address, i64 %length) {\n"
+                "entry:\n"
+                "  %pointer = inttoptr i64 %address to ptr\n"
+                "  %written = call i64 @write(i32 2, ptr %pointer, i64 %length)\n"
                 "  ret i64 %written\n"
                 "}\n"
                 "\n"
@@ -807,6 +1127,219 @@ private:
                 "  %length = add i64 %scan_index, 1\n"
                 "  call i64 @__ag_memcpy(i64 %dest, i64 %src, i64 %length)\n"
                 "  ret i64 %dest\n"
+                "}\n"
+                "\n"
+                "define i64 @__ag_strlen(i64 %address) {\n"
+                "entry:\n"
+                "  %pointer = inttoptr i64 %address to ptr\n"
+                "  br label %loop\n"
+                "loop:\n"
+                "  %index = phi i64 [ 0, %entry ], [ %next, %body ]\n"
+                "  %element = getelementptr i8, ptr %pointer, i64 %index\n"
+                "  %byte = load i8, ptr %element, align 1\n"
+                "  %end = icmp eq i8 %byte, 0\n"
+                "  br i1 %end, label %done, label %body\n"
+                "body:\n"
+                "  %next = add i64 %index, 1\n"
+                "  br label %loop\n"
+                "done:\n"
+                "  ret i64 %index\n"
+                "}\n"
+                "\n"
+                "define i64 @__ag_int_to_string(i64 %value) {\n"
+                "entry:\n"
+                "  %negative = icmp slt i64 %value, 0\n"
+                "  %negated = sub i64 0, %value\n"
+                "  %magnitude = select i1 %negative, i64 %negated, i64 %value\n"
+                "  br label %count_loop\n"
+                "count_loop:\n"
+                "  %count_value = phi i64 [ %magnitude, %entry ], [ %count_next, %count_body ]\n"
+                "  %count = phi i64 [ 0, %entry ], [ %count_next_index, %count_body ]\n"
+                "  %count_next_index = add i64 %count, 1\n"
+                "  %count_next = udiv i64 %count_value, 10\n"
+                "  %count_done = icmp eq i64 %count_next, 0\n"
+                "  br i1 %count_done, label %alloc, label %count_body\n"
+                "count_body:\n"
+                "  br label %count_loop\n"
+                "alloc:\n"
+                "  %sign = zext i1 %negative to i64\n"
+                "  %total = add i64 %count_next_index, %sign\n"
+                "  %size = add i64 %total, 1\n"
+                "  %buffer = call ptr @calloc(i64 1, i64 %size)\n"
+                "  %end_pointer = getelementptr i8, ptr %buffer, i64 %total\n"
+                "  store i8 0, ptr %end_pointer, align 1\n"
+                "  %write_start = sub i64 %total, 1\n"
+                "  br label %write_loop\n"
+                "write_loop:\n"
+                "  %write_value = phi i64 [ %magnitude, %alloc ], [ %write_next, %write_body ]\n"
+                "  %write_index = phi i64 [ %write_start, %alloc ], [ %write_next_index, %write_body ]\n"
+                "  %remainder = urem i64 %write_value, 10\n"
+                "  %digit = add i64 %remainder, 48\n"
+                "  %digit_byte = trunc i64 %digit to i8\n"
+                "  %write_pointer = getelementptr i8, ptr %buffer, i64 %write_index\n"
+                "  store i8 %digit_byte, ptr %write_pointer, align 1\n"
+                "  %write_next = udiv i64 %write_value, 10\n"
+                "  %write_next_index = sub i64 %write_index, 1\n"
+                "  %write_done = icmp eq i64 %write_next, 0\n"
+                "  br i1 %write_done, label %write_sign, label %write_body\n"
+                "write_body:\n"
+                "  br label %write_loop\n"
+                "write_sign:\n"
+                "  br i1 %negative, label %store_sign, label %finish\n"
+                "store_sign:\n"
+                "  store i8 45, ptr %buffer, align 1\n"
+                "  br label %finish\n"
+                "finish:\n"
+                "  %address = ptrtoint ptr %buffer to i64\n"
+                "  ret i64 %address\n"
+                "}\n"
+                "\n"
+                "define i64 @__ag_int_to_hex(i64 %value, i64 %uppercase, i64 %alternate) {\n"
+                "entry:\n"
+                "  %is_upper = icmp ne i64 %uppercase, 0\n"
+                "  %has_prefix = icmp ne i64 %alternate, 0\n"
+                "  br label %count_loop\n"
+                "count_loop:\n"
+                "  %count_value = phi i64 [ %value, %entry ], [ %count_next, %count_body ]\n"
+                "  %count = phi i64 [ 0, %entry ], [ %count_next_index, %count_body ]\n"
+                "  %count_next_index = add i64 %count, 1\n"
+                "  %count_next = lshr i64 %count_value, 4\n"
+                "  %count_done = icmp eq i64 %count_next, 0\n"
+                "  br i1 %count_done, label %alloc, label %count_body\n"
+                "count_body:\n"
+                "  br label %count_loop\n"
+                "alloc:\n"
+                "  %prefix_size = select i1 %has_prefix, i64 2, i64 0\n"
+                "  %total = add i64 %count_next_index, %prefix_size\n"
+                "  %size = add i64 %total, 1\n"
+                "  %buffer = call ptr @calloc(i64 1, i64 %size)\n"
+                "  br i1 %has_prefix, label %write_prefix, label %write_setup\n"
+                "write_prefix:\n"
+                "  store i8 48, ptr %buffer, align 1\n"
+                "  %x_pointer = getelementptr i8, ptr %buffer, i64 1\n"
+                "  %x_character = select i1 %is_upper, i8 88, i8 120\n"
+                "  store i8 %x_character, ptr %x_pointer, align 1\n"
+                "  br label %write_setup\n"
+                "write_setup:\n"
+                "  %write_start = sub i64 %total, 1\n"
+                "  br label %write_loop\n"
+                "write_loop:\n"
+                "  %write_value = phi i64 [ %value, %write_setup ], [ %write_next, %write_body ]\n"
+                "  %write_index = phi i64 [ %write_start, %write_setup ], [ %write_next_index, %write_body ]\n"
+                "  %nibble = and i64 %write_value, 15\n"
+                "  %is_digit = icmp ult i64 %nibble, 10\n"
+                "  %digit_character = add i64 %nibble, 48\n"
+                "  %alpha_base = select i1 %is_upper, i64 55, i64 87\n"
+                "  %alpha_character = add i64 %nibble, %alpha_base\n"
+                "  %character = select i1 %is_digit, i64 %digit_character, i64 %alpha_character\n"
+                "  %character_byte = trunc i64 %character to i8\n"
+                "  %write_pointer = getelementptr i8, ptr %buffer, i64 %write_index\n"
+                "  store i8 %character_byte, ptr %write_pointer, align 1\n"
+                "  %write_next = lshr i64 %write_value, 4\n"
+                "  %write_next_index = sub i64 %write_index, 1\n"
+                "  %write_done = icmp eq i64 %write_next, 0\n"
+                "  br i1 %write_done, label %finish, label %write_body\n"
+                "write_body:\n"
+                "  br label %write_loop\n"
+                "finish:\n"
+                "  %address = ptrtoint ptr %buffer to i64\n"
+                "  ret i64 %address\n"
+                "}\n"
+                "\n"
+                "define i64 @__ag_char_to_string(i64 %value) {\n"
+                "entry:\n"
+                "  %buffer = call ptr @calloc(i64 1, i64 2)\n"
+                "  %byte = trunc i64 %value to i8\n"
+                "  store i8 %byte, ptr %buffer, align 1\n"
+                "  %address = ptrtoint ptr %buffer to i64\n"
+                "  ret i64 %address\n"
+                "}\n"
+                "\n"
+                "define i64 @__ag_float_to_string(i64 %bits, i64 %precision) {\n"
+                "entry:\n"
+                "  %value = bitcast i64 %bits to double\n"
+                "  %buffer = call ptr @calloc(i64 1, i64 64)\n"
+                "  %precision32 = trunc i64 %precision to i32\n"
+                "  %written = call i32 (ptr, i64, ptr, ...) @snprintf(ptr %buffer, i64 64, ptr @.ag_float_format, i32 %precision32, double %value)\n"
+                "  %address = ptrtoint ptr %buffer to i64\n"
+                "  ret i64 %address\n"
+                "}\n"
+                "\n"
+                "define i64 @__ag_pad_left(i64 %address, i64 %width, i64 %fill) {\n"
+                "entry:\n"
+                "  %length = call i64 @__ag_strlen(i64 %address)\n"
+                "  %fits = icmp sge i64 %length, %width\n"
+                "  br i1 %fits, label %original, label %pad\n"
+                "original:\n"
+                "  ret i64 %address\n"
+                "pad:\n"
+                "  %size = add i64 %width, 1\n"
+                "  %buffer = call ptr @calloc(i64 1, i64 %size)\n"
+                "  %fill_byte = trunc i64 %fill to i8\n"
+                "  br label %fill_loop\n"
+                "fill_loop:\n"
+                "  %fill_index = phi i64 [ 0, %pad ], [ %fill_next, %fill_body ]\n"
+                "  %fill_done = icmp eq i64 %fill_index, %width\n"
+                "  br i1 %fill_done, label %copy, label %fill_body\n"
+                "fill_body:\n"
+                "  %fill_pointer = getelementptr i8, ptr %buffer, i64 %fill_index\n"
+                "  store i8 %fill_byte, ptr %fill_pointer, align 1\n"
+                "  %fill_next = add i64 %fill_index, 1\n"
+                "  br label %fill_loop\n"
+                "copy:\n"
+                "  %offset = sub i64 %width, %length\n"
+                "  %dest_pointer = getelementptr i8, ptr %buffer, i64 %offset\n"
+                "  %dest_address = ptrtoint ptr %dest_pointer to i64\n"
+                "  %copy_size = add i64 %length, 1\n"
+                "  call i64 @__ag_memcpy(i64 %dest_address, i64 %address, i64 %copy_size)\n"
+                "  %result = ptrtoint ptr %buffer to i64\n"
+                "  ret i64 %result\n"
+                "}\n"
+                "\n"
+                "define i64 @__ag_pad_right(i64 %address, i64 %width, i64 %fill) {\n"
+                "entry:\n"
+                "  %length = call i64 @__ag_strlen(i64 %address)\n"
+                "  %fits = icmp sge i64 %length, %width\n"
+                "  br i1 %fits, label %original, label %pad\n"
+                "original:\n"
+                "  ret i64 %address\n"
+                "pad:\n"
+                "  %size = add i64 %width, 1\n"
+                "  %buffer = call ptr @calloc(i64 1, i64 %size)\n"
+                "  %buffer_address = ptrtoint ptr %buffer to i64\n"
+                "  %copy_size = add i64 %length, 1\n"
+                "  call i64 @__ag_memcpy(i64 %buffer_address, i64 %address, i64 %copy_size)\n"
+                "  %fill_byte = trunc i64 %fill to i8\n"
+                "  br label %fill_loop\n"
+                "fill_loop:\n"
+                "  %fill_index = phi i64 [ %length, %pad ], [ %fill_next, %fill_body ]\n"
+                "  %fill_done = icmp eq i64 %fill_index, %width\n"
+                "  br i1 %fill_done, label %done, label %fill_body\n"
+                "fill_body:\n"
+                "  %fill_pointer = getelementptr i8, ptr %buffer, i64 %fill_index\n"
+                "  store i8 %fill_byte, ptr %fill_pointer, align 1\n"
+                "  %fill_next = add i64 %fill_index, 1\n"
+                "  br label %fill_loop\n"
+                "done:\n"
+                "  %result = ptrtoint ptr %buffer to i64\n"
+                "  ret i64 %result\n"
+                "}\n"
+                "\n"
+                "define i64 @__ag_str_concat(i64 %left, i64 %right) {\n"
+                "entry:\n"
+                "  %left_length = call i64 @__ag_strlen(i64 %left)\n"
+                "  %right_length = call i64 @__ag_strlen(i64 %right)\n"
+                "  %total = add i64 %left_length, %right_length\n"
+                "  %size = add i64 %total, 1\n"
+                "  %buffer = call ptr @calloc(i64 1, i64 %size)\n"
+                "  %buffer_address = ptrtoint ptr %buffer to i64\n"
+                "  call i64 @__ag_memcpy(i64 %buffer_address, i64 %left, i64 %left_length)\n"
+                "  %right_pointer = getelementptr i8, ptr %buffer, i64 %left_length\n"
+                "  %right_address = ptrtoint ptr %right_pointer to i64\n"
+                "  %right_copy = add i64 %right_length, 1\n"
+                "  call i64 @__ag_memcpy(i64 %right_address, i64 %right, i64 %right_copy)\n"
+                "  %result = ptrtoint ptr %buffer to i64\n"
+                "  ret i64 %result\n"
                 "}\n"
                 "\n"
                 "define void @__ag_exit(i64 %code) {\n"

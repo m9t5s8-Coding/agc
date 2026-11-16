@@ -45,12 +45,20 @@ void
 ReturnStatement::generate_ir(LabelCounters& counter,
                              Parser&        parser) {
   std::string exp;
+  const auto* return_type = parser.current_function_return_type();
+  bool        reference_return = false;
   if (m_return_expr) {
-    exp = m_return_expr->generate_ir(counter, parser);
+    reference_return =
+        return_type && return_type->kind == TypeKind::REFERENCE &&
+        m_return_expr->get_declared_data_type().kind == TypeKind::REFERENCE;
+    exp = reference_return ? m_return_expr->generate_reference_ir(counter, parser)
+                           : m_return_expr->generate_ir(counter, parser);
     if (auto bin_expr = dynamic_cast<BinaryExpression*>(m_return_expr.get());
         bin_expr && bin_expr->bin_operator == BIN_OPERATOR::ASSIGN_TO) {
       exp = bin_expr->left->generate_ir(counter, parser);
     }
+    if (return_type && !reference_return)
+      exp = narrow_value(exp, *return_type, counter, parser);
   }
   parser.add_instructios(AG_cscope<Return>(exp, counter.function_index));
 }
@@ -79,9 +87,14 @@ ReturnStatement::analyze_semantics(Parser& parser) {
     return false;
   }
 
-  const auto expr_type = m_return_expr->get_data_type();
+  const auto expr_type   = m_return_expr->get_data_type();
+  const auto expr_declared = m_return_expr->get_declared_data_type();
+  const bool reference_return =
+      return_type->kind == TypeKind::REFERENCE &&
+      expr_declared.kind == TypeKind::REFERENCE &&
+      is_compatible_type(*return_type, expr_declared);
   if (expr_type.primitive_type == PrimitiveType::UNEXPECTED ||
-      !is_compatible_type(*return_type, expr_type)) {
+      (!is_compatible_type(*return_type, expr_type) && !reference_return)) {
     print_error(error::IncompatibleTypes, parser, m_return_expr->source_location(m_location));
     return false;
   }

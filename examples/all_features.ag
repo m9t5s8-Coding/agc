@@ -3,7 +3,8 @@
 # This file is a valid, runnable example of the language features currently
 # supported by the compiler:
 #   * functions, prototypes, overloads, and pointer return types
-#   * let and var bindings, if/else, while, return, read, write, and exit
+#   * let and var bindings, immutable-by-default parameters with `mut`, if/else,
+#     while, return, read, write, and exit
 #   * integer arithmetic, comparisons, logical operators, bitwise operators,
 #     and shifts
 #   * string literals, string escapes, string indexing, and byte writes
@@ -107,7 +108,7 @@ func forward(stream : ostream*) -> ostream* {
 
 # A void function that mutates memory owned by the caller.  The explicit
 # return statement is required by the current void-function implementation.
-func fill(buffer : string, first : int, second : int) -> void {
+func fill(mut buffer : string, first : int, second : int) -> void {
   buffer[0] = first;
   buffer[1] = second;
   buffer[2] = 0;

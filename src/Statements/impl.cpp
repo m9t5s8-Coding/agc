@@ -44,16 +44,30 @@ ImplStatement::ParseImpl(Parser& parser) {
   auto impl_stmt        = AG_cscope<ImplStatement>();
   impl_stmt->m_location = {impl_token.line, impl_token.column};
 
+  // `impl<T> Stack<T>` is treated as `impl Stack` until generic instantiation
+  // exists.  The parameter names remain visible while methods are parsed.
+  const bool has_generic_parameters = parser.check(TokenName::AG_LESS);
+  if (has_generic_parameters) {
+    auto generic_parameters = parse_generic_parameter_list(parser);
+    if (!generic_parameters)
+      return nullptr;
+    parser.push_generic_parameters(std::move(*generic_parameters));
+  }
+
   auto first_name = parse_type_path(parser);
   if (!first_name)
+    return nullptr;
+  if (parser.check(TokenName::AG_LESS) && !skip_generic_arguments(parser))
     return nullptr;
 
   // Accept the trait form `impl Shape for Circle { ... }` by ignoring the
   // trait name.  Trait dispatch is not part of the current feature set.
-  if (parser.check(TokenName::AG_IDENTIFIER) && parser.current_token().value == "for") {
+  if (parser.check(TokenName::AG_FOR)) {
     parser.advance();
     auto owner_name = parse_type_path(parser);
     if (!owner_name)
+      return nullptr;
+    if (parser.check(TokenName::AG_LESS) && !skip_generic_arguments(parser))
       return nullptr;
     impl_stmt->m_type_name = std::move(*owner_name);
   } else {
@@ -75,11 +89,25 @@ ImplStatement::ParseImpl(Parser& parser) {
     }
 
     bool method_public = false;
-    if (parser.match(TokenName::AG_PUB))
-      method_public = true;
-    else if (parser.match(TokenName::AG_PRIV))
-      method_public = false;
+    bool method_static = false;
+    // Accept `pub`, `priv`, and `static` in any order before the method.
+    while (true) {
+      if (parser.match(TokenName::AG_PUB)) {
+        method_public = true;
+        continue;
+      }
+      if (parser.match(TokenName::AG_PRIV)) {
+        method_public = false;
+        continue;
+      }
+      if (parser.match(TokenName::AG_STATIC)) {
+        method_static = true;
+        continue;
+      }
+      break;
+    }
     parser.set_pending_public(method_public);
+    parser.set_pending_static(method_static);
 
     if (!parser.check(TokenName::AG_FUNC)) {
       print_error(error::ExpectedStatement, parser);
@@ -97,6 +125,8 @@ ImplStatement::ParseImpl(Parser& parser) {
   }
 
   parser.advance(); // `}`
+  if (has_generic_parameters)
+    parser.pop_generic_parameters();
   return impl_stmt;
 }
 

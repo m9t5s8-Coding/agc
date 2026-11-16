@@ -23,20 +23,27 @@ resolve_import_path(Parser& parser, const std::string& path) {
   const std::string suffix =
       separator == std::string::npos ? std::string{} : path.substr(separator);
 
-  if (const auto* alias = get_module_table().find_module_alias(scope, first))
-    return *alias + suffix;
-  if (!scope.empty()) {
-    if (const auto* alias = get_module_table().find_module_alias({}, first))
-      return *alias + suffix;
+  std::string resolved = path;
+  if (const auto* alias = get_module_table().find_module_alias(scope, first)) {
+    resolved = *alias + suffix;
+  } else if (!scope.empty()) {
+    if (const auto* alias = get_module_table().find_module_alias({}, first)) {
+      resolved = *alias + suffix;
+    } else {
+      const std::string candidate = scope + "::" + path;
+      if (const auto* part = get_module_table().find_module_part(candidate))
+        resolved = *part;
+      else if (get_module_table().has_module(candidate))
+        resolved = candidate;
+    }
   }
 
-  if (!scope.empty()) {
-    const std::string candidate = scope + "::" + path;
-    if (get_module_table().has_module(candidate))
-      return candidate;
-  }
+  // `mod ag::String;` puts String's declarations in the `ag` namespace.
+  // Accept `import ag::String { ... }` as a spelling for that file part.
+  if (const auto* part = get_module_table().find_module_part(resolved))
+    return *part;
 
-  return path;
+  return resolved;
 }
 } // namespace
 
@@ -106,7 +113,10 @@ ImportStatement::ParseImport(Parser& parser) {
     if (!parser.expect(TokenName::AG_RIGHT_BRACE, error::ExpectedRightBrace))
       return nullptr;
   } else {
-    get_module_table().add_module_alias(scope, last_path_segment(resolved_path), resolved_path);
+    // Alias the spelling the user imported (`io` in `import ag::io;`), not
+    // the owning namespace of a module part (`ag`).  That keeps
+    // `io::println` working while `ag::io::println` is rewritten separately.
+    get_module_table().add_module_alias(scope, last_path_segment(path), resolved_path);
   }
 
   if (!parser.expect(TokenName::AG_SEMICOLON, error::ExpectedSemicolon))

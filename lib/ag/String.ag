@@ -1,0 +1,679 @@
+# ag::String - a small std::string-style byte string for AGC.
+#
+# This file is the `String` part of the `ag` module.  Load it with:
+#
+#   mod ag::String;
+#   import ag::String { String, string_new, string_from };
+#
+# `mod ag::String;` reads only this file; other `ag` parts such as a future
+# `lib/ag/Vector.ag` are not parsed unless they are loaded explicitly.  The
+# public type below is `ag::String`.
+#
+# A String owns a heap buffer.  Copying a String value aliases the same
+# buffer, just like copying a pointer.  Use `clone()` when a deep copy is
+# wanted.  Call `deallocate()` on the owning value when it is no longer used.
+#
+# Text parameters are NUL-terminated byte addresses, so `char*`, `string`, and
+# string literals all work.  Passing a pointer into the same String to
+# append/insert is not supported when growth may reallocate the buffer.
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+func string_cstrlen(text: char*) -> int {
+  var length: int = 0;
+  while (text[length] != 0) {
+    length = length + 1;
+  }
+  return length;
+}
+
+pub func string_length(text: char*) -> int => string_cstrlen(text);
+
+func string_compare_cstr(left: char*, left_size: int, right: char*) -> int {
+  var right_size: int = string_cstrlen(right);
+  var limit: int = left_size;
+  if (right_size < limit) {
+    limit = right_size;
+  }
+
+  var index: int = 0;
+  while (index < limit) {
+    if (left[index] < right[index]) {
+      return -1;
+    }
+    if (left[index] > right[index]) {
+      return 1;
+    }
+    index = index + 1;
+  }
+
+  if (left_size < right_size) {
+    return -1;
+  }
+  if (left_size > right_size) {
+    return 1;
+  }
+  return 0;
+}
+
+# ---------------------------------------------------------------------------
+# String type
+# ---------------------------------------------------------------------------
+
+pub struct String {
+  data_ptr: char*,
+  data_size: int,
+  data_capacity: int,
+}
+
+impl String {
+  # Make sure the buffer can hold `needed` bytes plus the trailing NUL.
+  func ensure_capacity(mut self, needed: int) {
+    if (needed > self.data_capacity) {
+      var new_capacity: int = self.data_capacity * 2;
+      if (new_capacity < needed) {
+        new_capacity = needed;
+      }
+      if (new_capacity < 16) {
+        new_capacity = 16;
+      }
+
+      var new_data: char* = agc:alloc(new_capacity + 1);
+      agc:memcpy(new_data, self.data_ptr, self.data_size + 1);
+      agc:free(self.data_ptr);
+
+      self.data_ptr = new_data;
+      self.data_capacity = new_capacity;
+    }
+  }
+
+  # -------------------------------------------------------------------------
+  # Capacity / access
+  # -------------------------------------------------------------------------
+
+  pub func size(self) -> int => self.data_size;
+
+  pub func length(self) -> int => self.data_size;
+
+  pub func capacity(self) -> int => self.data_capacity;
+
+  pub func empty(self) -> bool => self.data_size == 0;
+
+  pub func data(self) -> char* => self.data_ptr;
+
+  pub func c_str(self) -> char* => self.data_ptr;
+
+  pub func at(self, index: int) -> char => self.data_ptr[index];
+
+  pub func set(mut self, index: int, ch: char) {
+    self.data_ptr[index] = ch;
+    return;
+  }
+
+  pub func front(self) -> char => self.data_ptr[0];
+
+  pub func back(self) -> char => self.data_ptr[self.data_size - 1];
+
+  # -------------------------------------------------------------------------
+  # Mutation
+  # -------------------------------------------------------------------------
+
+  pub func clear(mut self) {
+    self.data_size = 0;
+    self.data_ptr[0] = 0;
+    return;
+  }
+
+  pub func reserve(mut self, capacity: int) {
+    self.ensure_capacity(capacity);
+    return;
+  }
+
+  pub func push(mut self, ch: char) {
+    self.ensure_capacity(self.data_size + 1);
+    self.data_ptr[self.data_size] = ch;
+    self.data_size = self.data_size + 1;
+    self.data_ptr[self.data_size] = 0;
+    return;
+  }
+
+  pub func push_back(mut self, ch: char) {
+    self.push(ch);
+    return;
+  }
+
+  pub func append(mut self, text: char*) {
+    var length: int = string_cstrlen(text);
+    self.ensure_capacity(self.data_size + length);
+    agc:memcpy(self.data_ptr[self.data_size], text, length);
+    self.data_size = self.data_size + length;
+    self.data_ptr[self.data_size] = 0;
+    return;
+  }
+
+  pub func append_string(mut self, other: String) {
+    self.append(other.data_ptr);
+    return;
+  }
+
+  pub func assign(mut self, text: char*) {
+    self.clear();
+    self.append(text);
+    return;
+  }
+
+  pub func assign_string(mut self, other: String) {
+    self.clear();
+    self.append(other.data_ptr);
+    return;
+  }
+
+  pub func resize(mut self, new_size: int, ch: char) {
+    var target_size: int = new_size;
+    if (target_size < 0) {
+      target_size = 0;
+    }
+
+    if (target_size > self.data_size) {
+      self.ensure_capacity(target_size);
+      var index: int = self.data_size;
+      while (index < target_size) {
+        self.data_ptr[index] = ch;
+        index = index + 1;
+      }
+    }
+    self.data_size = target_size;
+    self.data_ptr[target_size] = 0;
+    return;
+  }
+
+  pub func pop_back(mut self) {
+    if (self.data_size > 0) {
+      self.data_size = self.data_size - 1;
+      self.data_ptr[self.data_size] = 0;
+    }
+    return;
+  }
+
+  pub func insert(mut self, index: int, text: char*) {
+    var insert_at: int = index;
+    if (insert_at < 0) {
+      insert_at = 0;
+    }
+    if (insert_at > self.data_size) {
+      insert_at = self.data_size;
+    }
+
+    var length: int = string_cstrlen(text);
+    if (length > 0) {
+      self.ensure_capacity(self.data_size + length);
+
+      var move_index: int = self.data_size;
+      while (move_index >= insert_at) {
+        self.data_ptr[move_index + length] = self.data_ptr[move_index];
+        move_index = move_index - 1;
+      }
+
+      agc:memcpy(self.data_ptr[insert_at], text, length);
+      self.data_size = self.data_size + length;
+    }
+    return;
+  }
+
+  pub func erase(mut self, index: int, count: int) {
+    var erase_at: int = index;
+    if (erase_at < 0) {
+      erase_at = 0;
+    }
+    if (erase_at > self.data_size) {
+      erase_at = self.data_size;
+    }
+
+    var erase_count: int = count;
+    if (erase_count < 0) {
+      erase_count = 0;
+    }
+    if (erase_count > self.data_size - erase_at) {
+      erase_count = self.data_size - erase_at;
+    }
+
+    if (erase_count > 0) {
+      var source: int = erase_at + erase_count;
+      var target: int = erase_at;
+      while (source <= self.data_size) {
+        self.data_ptr[target] = self.data_ptr[source];
+        target = target + 1;
+        source = source + 1;
+      }
+      self.data_size = self.data_size - erase_count;
+    }
+    return;
+  }
+
+  pub func replace(mut self, index: int, count: int, text: char*) {
+    self.erase(index, count);
+    self.insert(index, text);
+    return;
+  }
+
+  pub func to_upper(mut self) {
+    var index: int = 0;
+    while (index < self.data_size) {
+      var ch: int = self.data_ptr[index];
+      if (ch >= 97 && ch <= 122) {
+        self.data_ptr[index] = ch - 32;
+      }
+      index = index + 1;
+    }
+    return;
+  }
+
+  pub func to_lower(mut self) {
+    var index: int = 0;
+    while (index < self.data_size) {
+      var ch: int = self.data_ptr[index];
+      if (ch >= 65 && ch <= 90) {
+        self.data_ptr[index] = ch + 32;
+      }
+      index = index + 1;
+    }
+    return;
+  }
+
+  # -------------------------------------------------------------------------
+  # Search / comparison / copies
+  # -------------------------------------------------------------------------
+
+  pub func find_char(self, ch: char) -> int {
+    var index: int = 0;
+    while (index < self.data_size) {
+      if (self.data_ptr[index] == ch) {
+        return index;
+      }
+      index = index + 1;
+    }
+    return -1;
+  }
+
+  pub func find_from(self, text: char*, start: int) -> int {
+    var needle_length: int = string_cstrlen(text);
+    var search_start: int = start;
+    if (search_start < 0) {
+      search_start = 0;
+    }
+
+    if (needle_length == 0) {
+      if (search_start > self.data_size) {
+        return -1;
+      }
+      return search_start;
+    }
+
+    if (search_start > self.data_size) {
+      return -1;
+    }
+    if (needle_length > self.data_size - search_start) {
+      return -1;
+    }
+
+    var index: int = search_start;
+    while (index <= self.data_size - needle_length) {
+      var matched: int = 1;
+      var offset: int = 0;
+      while (offset < needle_length && matched == 1) {
+        if (self.data_ptr[index + offset] != text[offset]) {
+          matched = 0;
+        }
+        offset = offset + 1;
+      }
+      if (matched == 1) {
+        return index;
+      }
+      index = index + 1;
+    }
+    return -1;
+  }
+
+  pub func find(self, text: char*) -> int => self.find_from(text, 0);
+
+  pub func rfind_char(self, ch: char) -> int {
+    var index: int = self.data_size - 1;
+    while (index >= 0) {
+      if (self.data_ptr[index] == ch) {
+        return index;
+      }
+      index = index - 1;
+    }
+    return -1;
+  }
+
+  pub func rfind(self, text: char*) -> int {
+    var needle_length: int = string_cstrlen(text);
+    if (needle_length == 0) {
+      return self.data_size;
+    }
+    if (needle_length > self.data_size) {
+      return -1;
+    }
+
+    var index: int = self.data_size - needle_length;
+    while (index >= 0) {
+      var matched: int = 1;
+      var offset: int = 0;
+      while (offset < needle_length && matched == 1) {
+        if (self.data_ptr[index + offset] != text[offset]) {
+          matched = 0;
+        }
+        offset = offset + 1;
+      }
+      if (matched == 1) {
+        return index;
+      }
+      index = index - 1;
+    }
+    return -1;
+  }
+
+  pub func contains(self, text: char*) -> bool => self.find(text) >= 0;
+
+  pub func starts_with(self, text: char*) -> bool {
+    var length: int = string_cstrlen(text);
+    if (length > self.data_size) {
+      return 0;
+    }
+
+    var index: int = 0;
+    while (index < length) {
+      if (self.data_ptr[index] != text[index]) {
+        return 0;
+      }
+      index = index + 1;
+    }
+    return 1;
+  }
+
+  pub func ends_with(self, text: char*) -> bool {
+    var length: int = string_cstrlen(text);
+    if (length > self.data_size) {
+      return 0;
+    }
+
+    var start: int = self.data_size - length;
+    var index: int = 0;
+    while (index < length) {
+      if (self.data_ptr[start + index] != text[index]) {
+        return 0;
+      }
+      index = index + 1;
+    }
+    return 1;
+  }
+
+  pub func compare(self, other: String) -> int {
+    var limit: int = self.data_size;
+    if (other.data_size < limit) {
+      limit = other.data_size;
+    }
+
+    var index: int = 0;
+    while (index < limit) {
+      if (self.data_ptr[index] < other.data_ptr[index]) {
+        return -1;
+      }
+      if (self.data_ptr[index] > other.data_ptr[index]) {
+        return 1;
+      }
+      index = index + 1;
+    }
+
+    if (self.data_size < other.data_size) {
+      return -1;
+    }
+    if (self.data_size > other.data_size) {
+      return 1;
+    }
+    return 0;
+  }
+
+  pub func compare_cstr(self, text: char*) -> int =>
+    string_compare_cstr(self.data_ptr, self.data_size, text);
+
+  pub func to_int(self) -> int => string_to_int(self.data_ptr);
+
+  pub func equals(self, other: String) -> bool => self.compare(other) == 0;
+
+  pub func equals_cstr(self, text: char*) -> bool =>
+    self.compare_cstr(text) == 0;
+
+  pub func clone(self) -> String {
+    return string_from(self.data_ptr);
+  }
+
+  pub func substr(self, start: int, count: int) -> String {
+    var start_index: int = start;
+    var copy_count: int = count;
+
+    if (start_index < 0) {
+      start_index = 0;
+    }
+    if (start_index > self.data_size) {
+      start_index = self.data_size;
+    }
+
+    var available: int = self.data_size - start_index;
+    if (copy_count < 0) {
+      copy_count = 0;
+    }
+    if (copy_count > available) {
+      copy_count = available;
+    }
+
+    var result: String = string_with_capacity(copy_count);
+    agc:memcpy(result.data_ptr, self.data_ptr[start_index], copy_count);
+    result.data_ptr[copy_count] = 0;
+    result.data_size = copy_count;
+    return result;
+  }
+
+  pub func print(self) {
+    agc:write(self.data_ptr, self.data_size);
+    return;
+  }
+
+  pub func deallocate(mut self) {
+    agc:free(self.data_ptr);
+    self.data_ptr = "";
+    self.data_size = 0;
+    self.data_capacity = 0;
+    return;
+  }
+
+  pub func drop(mut self) {
+    self.deallocate();
+    return;
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Factories
+# ---------------------------------------------------------------------------
+
+pub func string_new() -> String => string_with_capacity(15);
+
+pub func string_with_capacity(capacity: int) -> String {
+  var requested: int = capacity;
+  if (requested < 0) {
+    requested = 0;
+  }
+
+  var result: String = String {};
+  result.data_ptr = agc:alloc(requested + 1);
+  result.data_size = 0;
+  result.data_capacity = requested;
+  result.data_ptr[0] = 0;
+  return result;
+}
+
+pub func string_from(text: char*) -> String {
+  var length: int = string_cstrlen(text);
+  var result: String = string_with_capacity(length);
+  agc:memcpy(result.data_ptr, text, length + 1);
+  result.data_size = length;
+  return result;
+}
+
+pub func string_from_char(ch: char) -> String {
+  var result: String = string_with_capacity(1);
+  result.data_ptr[0] = ch;
+  result.data_ptr[1] = 0;
+  result.data_size = 1;
+  return result;
+}
+
+pub func string_to_int(text: char*) -> int {
+  var index: int = 0;
+  var negative: int = 0;
+  var value: int = 0;
+  var valid: int = 1;
+
+  if (text[0] == '-') {
+    negative = 1;
+    index = 1;
+  } else if (text[0] == '+') {
+    index = 1;
+  }
+
+  while (text[index] != 0 && valid == 1) {
+    var digit: int = text[index] - 48;
+    if (digit < 0 || digit > 9) {
+      valid = 0;
+    } else {
+      value = value * 10 + digit;
+    }
+    index = index + 1;
+  }
+
+  if (negative == 1) {
+    return 0 - value;
+  }
+  return value;
+}
+
+pub func string_from_int(value: int) -> String {
+  var number: int = value;
+  var negative: int = 0;
+  if (number < 0) {
+    negative = 1;
+    number = 0 - number;
+  }
+
+  var digits: String = string_with_capacity(24);
+  if (number == 0) {
+    digits.push('0');
+  } else {
+    while (number != 0) {
+      var digit: int = number % 10;
+      digits.push(48 + digit);
+      number = number / 10;
+    }
+  }
+
+  if (negative == 1) {
+    digits.push('-');
+  }
+
+  var result: String = string_with_capacity(digits.size());
+  var index: int = digits.size() - 1;
+  while (index >= 0) {
+    result.push(digits.at(index));
+    index = index - 1;
+  }
+  digits.deallocate();
+  return result;
+}
+
+# ---------------------------------------------------------------------------
+# Operators
+# ---------------------------------------------------------------------------
+
+pub operator (s: String) [] (index: int) -> char => s.at(index);
+
+pub operator (mut s: String) += (text: char*) -> String {
+  s.append(text);
+  return s;
+}
+
+pub operator (mut s: String) += (other: String) -> String {
+  s.append_string(other);
+  return s;
+}
+
+pub operator (mut s: String) += (ch: char) -> String {
+  s.push(ch);
+  return s;
+}
+
+pub operator (mut s: String) << (text: char*) -> String {
+  s.append(text);
+  return s;
+}
+
+pub operator (mut s: String) << (other: String) -> String {
+  s.append_string(other);
+  return s;
+}
+
+pub operator (mut s: String) << (ch: char) -> String {
+  s.push(ch);
+  return s;
+}
+
+pub operator (left: String) + (right: char*) -> String {
+  var result: String = left.clone();
+  result.append(right);
+  return result;
+}
+
+pub operator (left: String) + (right: char) -> String {
+  var result: String = left.clone();
+  result.push(right);
+  return result;
+}
+
+pub operator (left: String) + (right: String) -> String {
+  var result: String = left.clone();
+  result.append_string(right);
+  return result;
+}
+
+pub operator (left: char*) + (right: String) -> String {
+  var result: String = string_from(left);
+  result.append_string(right);
+  return result;
+}
+
+pub operator (left: String) == (right: String) -> bool => left.equals(right);
+
+pub operator (left: String) == (right: char*) -> bool => left.equals_cstr(right);
+
+pub operator (left: char*) == (right: String) -> bool => right.equals_cstr(left);
+
+pub operator (left: String) != (right: String) -> bool => left.compare(right) != 0;
+
+pub operator (left: String) != (right: char*) -> bool => left.compare_cstr(right) != 0;
+
+pub operator (left: char*) != (right: String) -> bool => right.compare_cstr(left) != 0;
+
+pub operator (left: String) < (right: String) -> bool => left.compare(right) < 0;
+
+pub operator (left: String) < (right: char*) -> bool => left.compare_cstr(right) < 0;
+
+pub operator (left: String) > (right: String) -> bool => left.compare(right) > 0;
+
+pub operator (left: String) > (right: char*) -> bool => left.compare_cstr(right) > 0;
+
+pub operator (left: String) <= (right: String) -> bool => left.compare(right) <= 0;
+
+pub operator (left: String) >= (right: String) -> bool => left.compare(right) >= 0;

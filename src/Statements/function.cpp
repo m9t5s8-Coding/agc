@@ -17,6 +17,31 @@
 
 namespace ag {
 
+namespace {
+// Keep parser generic-parameter scopes balanced across early returns from
+// function parsing.
+class GenericParameterGuard {
+public:
+  explicit GenericParameterGuard(Parser& parser)
+      : m_parser(parser) {}
+
+  ~GenericParameterGuard() {
+    if (m_active)
+      m_parser.pop_generic_parameters();
+  }
+
+  void
+  activate(std::vector<std::string> parameters) {
+    m_parser.push_generic_parameters(std::move(parameters));
+    m_active = true;
+  }
+
+private:
+  Parser& m_parser;
+  bool    m_active = false;
+};
+} // namespace
+
 static std::optional<std::vector<FunctionParameter>>
 parse_function_parameter(Parser& parser) {
   std::vector<FunctionParameter> l_parameters;
@@ -48,26 +73,46 @@ parse_function_parameter(Parser& parser) {
       param.type.is_const = !is_mut;
       parser.advance();
     } else {
-      if (is_mut) {
-        print_error(ag::error::ExpectedParameterName, parser, param.location);
-        return std::nullopt;
-      }
-
       // Parameters may be written as `name: Type` or as just `Type`.  The
       // latter is an unnamed parameter that is still part of the ABI but
       // cannot be referenced from the function body.
-      if (parser.check(TokenName::AG_IDENTIFIER) &&
-          parser.peek_token().token_name == TokenName::AG_COLON) {
+      const bool has_name = parser.check(TokenName::AG_IDENTIFIER) &&
+                            parser.peek_token().token_name == TokenName::AG_COLON;
+      if (has_name) {
         param.name = parser.current_token().value;
         parser.advance(); // name
         parser.advance(); // ':'
+      } else if (is_mut) {
+        print_error(ag::error::ExpectedParameterName, parser, param.location);
+        return std::nullopt;
       }
 
       auto type = parse_type(parser);
       if (!type)
         return std::nullopt;
 
-      param.type = std::move(*type);
+      // `name: Type...` declares a variadic parameter.  It is bound as a
+      // pointer to the element type; call sites pass a pointer to a block
+      // whose preceding slot holds the element count.
+      if (parser.match(TokenName::AG_ELLIPSIS)) {
+        auto element = std::make_shared<DataType>(*type);
+
+        DataType variadic;
+        variadic.kind           = TypeKind::POINTER;
+        variadic.primitive_type = PrimitiveType::USER_DEFINED;
+        variadic.pointee        = std::move(element);
+        variadic.is_variadic    = true;
+        variadic.size_in_bytes  = 8;
+        variadic.alignment      = 8;
+        param.type              = std::move(variadic);
+      } else {
+        param.type = std::move(*type);
+      }
+
+      // Parameters are immutable bindings by default.  `mut name: Type`
+      // permits rebinding the parameter and mutating by-value fields, while
+      // writes through pointers/references are governed by their own types.
+      param.type.is_const = !is_mut;
     }
 
     if (parser.match(TokenName::AG_ASSIGN)) {
@@ -218,6 +263,10 @@ mangle_label_component(std::string_view name) {
 
 std::string
 FunctionStatement::source_name() const {
+  // External declarations live in the C symbol namespace: `extern "c"` code
+  // calls them without a module prefix.
+  if (m_is_extern)
+    return m_function_name;
   if (!m_owner_type.empty())
     return m_owner_type + "." + m_function_name;
   if (!m_module_path.empty())
@@ -225,8 +274,25 @@ FunctionStatement::source_name() const {
   return m_function_name;
 }
 
+bool
+FunctionStatement::is_associated() const {
+  if (m_owner_type.empty())
+    return false;
+  if (m_is_static)
+    return true;
+  // Instance methods always declare `self` first.  A method without it is an
+  // associated function even when the `static` keyword is omitted.
+  return m_parameters.empty() || m_parameters.front().name != "self";
+}
+
 std::string
 FunctionStatement::function_label() const {
+  // External symbols must keep the exact C link name.  No type suffix and no
+  // module/owner prefix, otherwise the linker cannot find `glClear`, `puts`,
+  // or any other library function.
+  if (m_is_extern)
+    return m_function_name;
+
   std::string label;
   if (!m_is_operator) {
     label = generate_function_label(m_function_name, m_parameters);
@@ -250,8 +316,10 @@ AG_scope<Statements>
 FunctionStatement::ParseFunction(Parser& parser) {
   parser.advance();
 
-  auto        function_stmt = AG_cscope<FunctionStatement>();
+  auto        function_stmt  = AG_cscope<FunctionStatement>();
+  function_stmt->m_is_static = parser.take_pending_static();
   function_stmt->m_is_public = parser.take_pending_public();
+  function_stmt->m_is_extern = parser.in_extern_block();
   TokenName   temp_token;
   const Token function_token = parser.current_token();
 
@@ -262,11 +330,30 @@ FunctionStatement::ParseFunction(Parser& parser) {
       parser, ag::error::ExpectedFunctionName, function_stmt->m_function_name, nullptr, TokenName::AG_IDENTIFIER);
   function_stmt->m_location = {function_token.line, function_token.column};
 
+  // Generic functions are parsed but not instantiated yet.  The parameter
+  // names are visible while the signature is parsed.
+  GenericParameterGuard generic_guard(parser);
+  if (parser.check(TokenName::AG_LESS)) {
+    auto generic_parameters = parse_generic_parameter_list(parser);
+    if (!generic_parameters)
+      return nullptr;
+    generic_guard.activate(std::move(*generic_parameters));
+  }
+
   AG_EXPECT_OR_RETURN(parser, TokenName::AG_LEFT_PAREN, ag::error::ExpectedLeftParen, nullptr);
 
   AG_PARSE_OPT_OR_RETURN(parser, parse_function_parameter, function_stmt->m_parameters, nullptr);
 
+  // Methods in an `impl` without a receiver are associated functions.  Mark
+  // them here so call resolution can find them through `Type::name`.
+  if (function_stmt->is_associated())
+    function_stmt->m_is_static = true;
+
   {
+    // Trait bounds are accepted and ignored until trait dispatch exists.
+    if (!skip_where_clause(parser))
+      return nullptr;
+
     AG_CHECK_ONE_OF_OR_RETURN(parser,
                               ag::error::ExpectedAfterParameters,
                               &temp_token,
@@ -279,6 +366,9 @@ FunctionStatement::ParseFunction(Parser& parser) {
     if (temp_token == TokenName::AG_ARROW) {
       parser.advance();
       AG_PARSE_OPT_OR_RETURN(parser, parse_return_type, function_stmt->m_return_type, nullptr);
+
+      if (!skip_where_clause(parser))
+        return nullptr;
 
       AG_CHECK_ONE_OF_OR_RETURN(parser,
                                 ag::error::ExpectedAfterReturnType,
@@ -322,7 +412,9 @@ FunctionStatement::ParseOperator(Parser& parser) {
   auto function_stmt           = AG_cscope<FunctionStatement>();
   function_stmt->m_location    = {operator_token.line, operator_token.column};
   function_stmt->m_is_operator = true;
+  function_stmt->m_is_static   = parser.take_pending_static();
   function_stmt->m_is_public   = parser.take_pending_public();
+  function_stmt->m_is_extern   = parser.in_extern_block();
   function_stmt->m_module_path = parser.current_module_path();
 
   std::string                   symbol;
@@ -428,12 +520,22 @@ FunctionStatement::register_function(Parser& parser) {
   FunctionEntry entry;
   entry.name        = source_name();
   entry.label       = function_label();
-  entry.module_path = m_module_path;
+  entry.module_path = m_is_extern ? std::string{} : m_module_path;
   entry.return_type = std::make_shared<DataType>(m_return_type);
   entry.parameters  = m_parameters;
-  entry.is_defined  = !is_declaration;
-  entry.is_public   = m_is_public;
+  entry.is_defined  = !is_declaration && !m_is_extern;
+  entry.is_extern   = m_is_extern;
+  // External C symbols are globally visible; they do not belong to an AGC
+  // module namespace.
+  entry.is_public   = m_is_public || m_is_extern;
+  entry.is_static   = m_is_static;
   entry.location    = m_location;
+  for (const auto& parameter : m_parameters) {
+    if (parameter.type.is_variadic) {
+      entry.is_variadic = true;
+      break;
+    }
+  }
 
   if (!get_function_table().declare(entry.label, entry)) {
     print_error(error::RedefinitionOfFunction, parser, m_location);
@@ -516,7 +618,9 @@ FunctionStatement::generate_ir(LabelCounters& counter,
   }
 
   parser.add_instructios(AG_cscope<FunctionLabel>(function_label, counter.function_index));
+  parser.push_function_return_type(m_return_type);
   m_function_body->generate_ir(counter, parser);
+  parser.pop_function_return_type();
   counter.function_index = -1;
 }
 

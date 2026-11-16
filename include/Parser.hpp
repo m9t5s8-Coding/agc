@@ -15,6 +15,7 @@
 namespace ag {
 using TokensVector = std::vector<Token>;
 enum class OutputFormat { JSON, TEXT, NONE };
+class Expression;
 class Parser {
 public:
   // Set Lexer so that we can use later
@@ -64,6 +65,13 @@ public:
   const Token&
   peek_token(size_t offset = 1) const {
     return is_valid(offset) ? m_tokens[m_index + offset] : m_EOToken;
+  }
+
+  // Token consumed immediately before the cursor.
+  const Token&
+  previous_token() const {
+    return m_index > 0 && m_index - 1 < m_tokens.size() ? m_tokens[m_index - 1]
+                                                        : m_EOToken;
   }
 
   bool
@@ -130,6 +138,13 @@ public:
   void
   set_emit_native_assembly(bool enabled) {
     m_emit_native_assembly = enabled;
+  }
+
+  // Stop after parsing so syntax-only translation units (such as design plans
+  // that reference not-yet-implemented libraries) can be validated.
+  void
+  set_parse_only(bool enabled) {
+    m_parse_only = enabled;
   }
 
   // Linear IR instructions after the IR generation phase.  The LLVM backend
@@ -214,6 +229,14 @@ public:
     return m_index;
   }
 
+  // Restore an earlier cursor position.  Used for short look-ahead re-parses
+  // such as lowering `value ??= fallback` into an assignment.
+  void
+  set_current_position(size_t position) {
+    if (position <= tokens_size())
+      m_index = position;
+  }
+
   // Add the statements AST
   bool
   add_statements(AG_scope<Statements> ptr) {
@@ -257,6 +280,87 @@ public:
   const DataType*
   current_function_return_type() const {
     return m_function_return_types.empty() ? nullptr : &m_function_return_types.back();
+  }
+
+  // Active loop labels used by `break` and `continue`.  Labels are allocated
+  // while IR is generated, so the enclosing loop pushes them before emitting
+  // its body.
+  struct LoopLabels {
+    std::string break_label;
+    std::string continue_label;
+    std::string user_label;
+    std::string result_slot;
+  };
+
+  void
+  push_loop_labels(std::string break_label,
+                   std::string continue_label,
+                   std::string user_label  = {},
+                   std::string result_slot = {}) {
+    m_loop_labels.push_back({std::move(break_label),
+                             std::move(continue_label),
+                             std::move(user_label),
+                             std::move(result_slot)});
+  }
+
+  void
+  pop_loop_labels() {
+    if (!m_loop_labels.empty())
+      m_loop_labels.pop_back();
+  }
+
+  const LoopLabels*
+  current_loop_labels() const {
+    return m_loop_labels.empty() ? nullptr : &m_loop_labels.back();
+  }
+
+  // Resolve a `break label`/`continue label` target.  An empty label selects
+  // the innermost loop.
+  const LoopLabels*
+  find_loop_labels(std::string_view label) const {
+    if (label.empty())
+      return current_loop_labels();
+    for (auto it = m_loop_labels.rbegin(); it != m_loop_labels.rend(); ++it) {
+      if (it->user_label == label)
+        return &*it;
+    }
+    return nullptr;
+  }
+
+  // Parse-time loop label names let `break name;` distinguish a labelled
+  // break from `break value;` before IR labels exist.
+  void
+  push_loop_label_name(std::string label) {
+    m_loop_label_names.push_back(std::move(label));
+  }
+
+  void
+  pop_loop_label_name() {
+    if (!m_loop_label_names.empty())
+      m_loop_label_names.pop_back();
+  }
+
+  bool
+  is_loop_label_name(std::string_view label) const {
+    return std::find(m_loop_label_names.begin(),
+                     m_loop_label_names.end(),
+                     label) != m_loop_label_names.end();
+  }
+
+  void
+  enter_loop() {
+    ++m_loop_depth;
+  }
+
+  void
+  exit_loop() {
+    if (m_loop_depth > 0)
+      --m_loop_depth;
+  }
+
+  bool
+  inside_loop() const {
+    return m_loop_depth > 0;
   }
 
   // Operator bodies must not resolve their own implicit operator syntax back
@@ -319,6 +423,28 @@ public:
     return m_module_paths.empty() ? empty : m_module_paths.back();
   }
 
+  // Generic parameters (`struct Stack<T>`, `func max<T>`, `impl<T>`) are not
+  // monomorphized yet.  Recording their names lets type positions accept them
+  // as opaque, pointer-sized types instead of reporting them as undefined.
+  void
+  push_generic_parameters(std::vector<std::string> names) {
+    m_generic_parameter_scopes.push_back(std::move(names));
+  }
+
+  void
+  pop_generic_parameters() {
+    if (!m_generic_parameter_scopes.empty())
+      m_generic_parameter_scopes.pop_back();
+  }
+
+  bool
+  is_generic_parameter(std::string_view name) const {
+    if (m_generic_parameter_scopes.empty())
+      return false;
+    const auto& scope = m_generic_parameter_scopes.back();
+    return std::find(scope.begin(), scope.end(), name) != scope.end();
+  }
+
   std::string
   qualify_name(std::string_view name) const {
     if (current_module_path().empty())
@@ -340,6 +466,46 @@ public:
     const bool value = m_pending_public;
     m_pending_public = false;
     return value;
+  }
+
+  // `static` is accepted before local declarations (persistent storage),
+  // module-level values (global storage), and member functions (associated
+  // functions with no receiver).
+  void
+  set_pending_static(bool value) {
+    m_pending_static = value;
+  }
+
+  bool
+  take_pending_static() {
+    const bool value = m_pending_static;
+    m_pending_static = false;
+    return value;
+  }
+
+  // `extern "c" { ... }` groups declarations whose symbols are provided by a
+  // linked library.  The flag is consulted by function parsing so those
+  // declarations keep their exact C name instead of using AGC's mangling.
+  void
+  set_in_extern_block(bool value) {
+    m_in_extern_block = value;
+  }
+
+  bool
+  in_extern_block() const {
+    return m_in_extern_block;
+  }
+
+  // Module files are first looked up next to the declaring source file, then
+  // through the include paths supplied with `-I`/`--include`.
+  void
+  add_include_path(std::string path) {
+    m_include_paths.push_back(std::move(path));
+  }
+
+  const std::vector<std::string>&
+  include_paths() const {
+    return m_include_paths;
   }
 
   // Resolve an unqualified or module-qualified source name through the import
@@ -382,6 +548,13 @@ public:
     return previous;
   }
 
+  // Parse an expression from a detached source fragment, e.g. one embedded in
+  // an f-string.  The fragment is tokenized with a temporary lexer whose
+  // storage is retained by this parser so token views stay valid.
+  AG_scope<Expression>
+  parse_inline_expression(std::string_view      source,
+                          const SourceLocation& location);
+
   void
   add_instructios(AG_scope<Instructions> instruction);
 
@@ -413,17 +586,30 @@ private:
   std::string  m_llvm_text;
   bool         m_emit_llvm = false;
   bool         m_emit_native_assembly = false;
+  bool         m_parse_only = false;
   OutputFormat m_output_format = OutputFormat::NONE;
 
   std::vector<DataType> m_function_return_types;
   std::vector<std::string> m_active_operators;
   std::vector<std::string> m_impl_types;
   std::vector<std::string> m_module_paths;
+  std::vector<std::vector<std::string>> m_generic_parameter_scopes;
+  std::vector<LoopLabels> m_loop_labels;
+  std::vector<std::string> m_loop_label_names;
+  int                     m_loop_depth = 0;
   std::deque<std::string>  m_operator_names;
+  std::vector<std::string> m_include_paths;
   bool                     m_pending_public = false;
+  bool                     m_pending_static = false;
+  bool                     m_in_extern_block = false;
 
   std::vector<AG_scope<Statements>>   m_statements;
   std::vector<AG_scope<Instructions>> m_instructions;
+
+  // Owned storage for f-string fragments.  Token values keep string_views
+  // into these buffers, so they must outlive parsing and IR generation.
+  std::deque<std::string> m_embedded_sources;
+  std::deque<Lexer>       m_embedded_lexers;
 };
 
 } // namespace ag

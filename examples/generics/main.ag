@@ -1,0 +1,57 @@
+# Generic syntax is accepted and erased to pointer-sized opaque types.  These
+# examples exercise generic structs, generic functions, array literals, guard
+# statements, and type inference.
+
+struct Box<T> {
+    value: T,
+}
+
+impl<T> Box<T> {
+    func make(v: T) -> Self => Box { value: v };
+
+    func get(self) -> T => self.value;
+}
+
+func max<T>(a: T, b: T) -> T where T: Ord {
+    return a > b ? a : b;
+}
+
+func requirePositive(n: int) -> int {
+    guard (n > 0) else {
+        return -1;
+    }
+    return n;
+}
+
+func main() -> int {
+    let boxed = Box::make(42);
+    if (boxed.get() != 42) {
+        return 1;
+    }
+
+    if (max(3, 9) != 9) {
+        return 2;
+    }
+
+    if (requirePositive(7) != 7) {
+        return 3;
+    }
+    if (requirePositive(-1) != -1) {
+        return 4;
+    }
+
+    let values: int[5] = [1, 2, 3, 4, 5];
+    if (values[0] != 1) {
+        return 5;
+    }
+    if (values[4] != 5) {
+        return 6;
+    }
+
+    let inferred = values[2];
+    if (inferred != 3) {
+        return 7;
+    }
+
+    return 0;
+}

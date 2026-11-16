@@ -1,9 +1,9 @@
 #pragma once
 
+#include "Expressions/Expression.hpp"
 #include "Statements/Statements.hpp"
 namespace ag {
 class Parser;
-class Expression;
 class IfStatement : public Statements {
 public:
   IfStatement() {}
@@ -23,5 +23,9 @@ private:
   AG_scope<Expression> m_condition;
   AG_scope<Statements> m_if_body;
   AG_scope<Statements> m_else_body;
+
+  // `if let pattern = expression { ... }`
+  bool         m_is_let = false;
+  MatchPattern m_pattern;
 };
 } // namespace ag

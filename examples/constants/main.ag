@@ -1,0 +1,35 @@
+# `const` declarations are immutable bindings that require an initializer.
+# Integer literals accept decimal, hexadecimal, binary, octal, and `_`
+# separators; the lexer normalizes them to decimal for the backends.
+const MAX: int = 100;
+const MASK: int = 0xFF_FF;
+const FLAGS: int = 0b1010_0110;
+const PERMISSIONS: int = 0o755;
+const MILLION: int = 1_000_000;
+
+func read_const() -> int {
+  const LOCAL: int = 0x10;
+  return LOCAL + 0b11;
+}
+
+func main() -> int {
+  if (MAX != 100) {
+    return 1;
+  }
+  if (MASK != 65535) {
+    return 2;
+  }
+  if (FLAGS != 166) {
+    return 3;
+  }
+  if (PERMISSIONS != 493) {
+    return 4;
+  }
+  if (MILLION != 1000000) {
+    return 5;
+  }
+  if (read_const() != 19) {
+    return 6;
+  }
+  return 0;
+}

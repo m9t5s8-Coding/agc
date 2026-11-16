@@ -60,6 +60,11 @@ public:
   virtual bool
   analyze_semantics(Parser&) = 0;
 
+  // Labelled loops (`outer: for ...`) set their name here.  The default is a
+  // no-op so only loop statements need to override it.
+  virtual void
+  set_loop_label(std::string) {}
+
 protected:
   SourceLocation m_location;
 };

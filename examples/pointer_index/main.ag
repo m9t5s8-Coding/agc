@@ -1,0 +1,73 @@
+# Pointer indexing works for any pointee type, not just `char*`.  The offset
+# is scaled by the pointee size, so `values[1]` advances one `int`.
+func read(ptr: int*) -> int {
+  return *ptr;
+}
+
+func bump(ptr: int*) -> void {
+  *ptr = *ptr + 1;
+}
+
+func main() -> int {
+  var values: int* = agc:alloc(64);
+  values[0] = 10;
+  values[1] = 20;
+  values[2] = 30;
+
+  if (values[0] != 10 || values[1] != 20 || values[2] != 30) {
+    return 1;
+  }
+
+  # Indexed lvalues support the same compound and increment forms as plain
+  # variables.
+  values[1] += 5;
+  if (values[1] != 25) {
+    return 2;
+  }
+  let old_value: int = values[1]++;
+  let new_value: int = ++values[2];
+  if (old_value != 25 || new_value != 31 || values[1] != 26 || values[2] != 31) {
+    return 3;
+  }
+
+  # Passing an indexed element to a pointer parameter passes its address.
+  bump(values[0]);
+  if (values[0] != 11) {
+    return 4;
+  }
+  if (read(values[1]) != 26 || read(&values[2]) != 31) {
+    return 5;
+  }
+
+  # Pointer-to-pointer indexing loads the inner pointer, then indexes again.
+  var alias: int* = values;
+  var table: int** = &alias;
+  if (table[0][2] != 31) {
+    return 6;
+  }
+  table[0][0] = 12;
+  if (values[0] != 12) {
+    return 7;
+  }
+
+  var other: int* = agc:alloc(64);
+  other[0] = 99;
+  table[0] = other;
+  if (table[0][0] != 99 || alias[0] != 99) {
+    return 8;
+  }
+
+  # Character pointers keep their byte-sized loads and stores.
+  var bytes: char* = agc:alloc(8);
+  bytes[0] = 'A';
+  bytes[1] = 'B';
+  bytes[2] = 0;
+  if (bytes[0] != 'A' || bytes[1] != 'B' || bytes[2] != 0) {
+    return 9;
+  }
+
+  agc:free(values);
+  agc:free(other);
+  agc:free(bytes);
+  return 0;
+}

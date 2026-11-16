@@ -1,0 +1,123 @@
+struct Counter {
+  pub value: int;
+}
+
+# Parameters are immutable bindings by default.  `mut` permits changing the
+# local copy; the caller's value is unchanged.
+func inc_value(mut x: int) -> int {
+  x = x + 1;
+  return x;
+}
+
+# References are transparent: reads load the referred value and assignments
+# write through the reference.  Explicit `*x` remains valid.
+func inc_ref(x: &mut int) -> void {
+  x = x + 1;
+}
+
+func read_ref(x: &int) -> int {
+  return x;
+}
+
+func set_pointer(x: int*, value: int) -> void {
+  *x = value;
+}
+
+func get_pointer(x: int*) -> int {
+  return *x;
+}
+
+func bump_counter(counter: &mut Counter) -> void {
+  counter.value = counter.value + 1;
+}
+
+func read_counter(counter: &Counter) -> int {
+  return counter.value;
+}
+
+func mutate_copy(mut counter: Counter) -> void {
+  counter.value = 100;
+}
+
+func main() -> int {
+  var n: int = 10;
+
+  let r: &int = &n;
+  let w: &mut int = &mut n;
+
+  if (r != 10 || *r != 10) {
+    return 1;
+  }
+
+  inc_ref(w);
+  if (n != 11) {
+    return 2;
+  }
+  if (w != 11 || *w != 11) {
+    return 3;
+  }
+
+  w = 20;
+  if (n != 20) {
+    return 4;
+  }
+
+  let p: int* = &n;
+  if (get_pointer(p) != 20) {
+    return 5;
+  }
+  set_pointer(p, 30);
+  if (n != 30) {
+    return 6;
+  }
+
+  if (inc_value(n) != 31) {
+    return 7;
+  }
+  if (n != 30) {
+    return 8;
+  }
+
+  let shared: &int = &n;
+  let shared_alias: &int = shared;
+  if (read_ref(shared_alias) != 30) {
+    return 9;
+  }
+
+  let p2: int* = &n;
+  if (*(p2 + 0) != 30) {
+    return 10;
+  }
+
+  let w2: &mut int = &mut w;
+  w2 = 40;
+  if (n != 40) {
+    return 11;
+  }
+
+  var implicit: int = 50;
+  inc_ref(implicit);
+  if (implicit != 51) {
+    return 12;
+  }
+
+  var counter: Counter = Counter { value: 7 };
+  bump_counter(counter);
+  if (read_counter(counter) != 8) {
+    return 13;
+  }
+
+  let counter_ref: &mut Counter = &mut counter;
+  counter_ref.value = 9;
+  if (counter.value != 9) {
+    return 14;
+  }
+
+  var copied: Counter = Counter { value: 3 };
+  mutate_copy(copied);
+  if (copied.value != 3) {
+    return 15;
+  }
+
+  return 0;
+}

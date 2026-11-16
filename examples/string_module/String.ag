@@ -41,7 +41,7 @@ pub func construct(capacity : int) -> String {
   return str;
 }
 
-pub operator (str : String) << (msg : char*) {
+pub operator (mut str : String) << (msg : char*) {
   agc:strcpy(str.ptr[str.size], msg); 
   str.size = str.size + strlen(msg);
 }

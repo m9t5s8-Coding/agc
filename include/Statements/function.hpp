@@ -55,6 +55,11 @@ private:
   std::string
   source_name() const;
 
+  // Member functions without a `self` parameter are associated functions and
+  // can be called as `Type::name(...)`.  `static func` makes this explicit.
+  bool
+  is_associated() const;
+
   std::string          m_function_name;
   std::string          m_owner_type;
   std::string          m_module_path;
@@ -64,5 +69,9 @@ private:
   bool                 is_declaration = false;
   bool                 m_is_operator  = false;
   bool                 m_is_public    = false;
+  bool                 m_is_static    = false;
+  // Set while parsing an `extern "c" { ... }` block.  External declarations
+  // keep their raw C symbol name and are resolved by the system linker.
+  bool                 m_is_extern    = false;
 };
 } // namespace ag

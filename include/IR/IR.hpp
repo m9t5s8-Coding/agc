@@ -1,10 +1,13 @@
 #pragma once
 
 #include "FunctionLabel.hpp"
+#include "IR/AddressOf.hpp"
 #include "IR/Assign.hpp"
 #include "IR/Binary.hpp"
 #include "IR/CondJump.hpp"
 #include "IR/DataItem.hpp"
+#include "IR/DerefLoad.hpp"
+#include "IR/DerefStore.hpp"
 #include "IR/FunctionCall.hpp"
 #include "IR/GlobalVariable.hpp"
 #include "IR/IRTable.hpp"
@@ -13,5 +16,6 @@
 #include "IR/Label.hpp"
 #include "IR/MemberLoad.hpp"
 #include "IR/MemberStore.hpp"
+#include "IR/Narrow.hpp"
 #include "IR/Param.hpp"
 #include "IR/Return.hpp"

@@ -1,0 +1,92 @@
+# `static` storage keeps module-level and local values alive for the whole
+# program.  Local `static` declarations are initialized once, on first use.
+# `static func` declares an associated member function with no receiver.
+
+static var counter: int = 5;
+static const LIMIT: int = 3;
+
+func global_bump() -> int {
+  counter += 1;
+  return counter;
+}
+
+func bump() -> int {
+  static var calls: int = 0;
+  calls += 1;
+  return calls;
+}
+
+func next_from(start: int) -> int {
+  # A non-literal initializer still runs exactly once.
+  static var value: int = start * 2;
+  value += 1;
+  return value;
+}
+
+func local_const() -> int {
+  static const STEP: int = 0x10;
+  return STEP;
+}
+
+struct Point {
+  x: int,
+  y: int,
+}
+
+impl Point {
+  static func origin() -> Self => Point { x: 0, y: 0 };
+
+  static func make(x: int, y: int) -> Self => Point { x: x, y: y };
+
+  # A method without `self` is associated even without the `static` keyword.
+  func sum(self) -> int => self.x + self.y;
+
+  func shifted(self, dx: int) -> Self => Point { x: self.x + dx, y: self.y };
+}
+
+func main() -> int {
+  if (counter != 5 || LIMIT != 3) {
+    return 1;
+  }
+  let first: int = global_bump();
+  if (first != 6) {
+    return 2;
+  }
+  let second: int = global_bump();
+  if (second != 7) {
+    return 2;
+  }
+
+  let call_one: int = bump();
+  let call_two: int = bump();
+  let call_three: int = bump();
+  if (call_one != 1 || call_two != 2 || call_three != 3) {
+    return 3;
+  }
+
+  if (next_from(10) != 21) {
+    return 4;
+  }
+  if (next_from(100) != 22) {
+    return 5;
+  }
+
+  if (local_const() != 16) {
+    return 6;
+  }
+
+  let origin: Point = Point::origin();
+  if (origin.x != 0 || origin.y != 0) {
+    return 7;
+  }
+
+  let p: Point = Point::make(3, 4);
+  if (p.sum() != 7) {
+    return 8;
+  }
+  if (p.shifted(2).sum() != 9) {
+    return 9;
+  }
+
+  return 0;
+}

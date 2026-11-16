@@ -1,0 +1,54 @@
+# SFML window and moving rectangle.
+#
+# Build with ./build.sh from this directory, or from the repository root:
+#   examples/sfml/build.sh
+#   examples/sfml/build/sfml_demo
+#
+# Press Escape or close the window to exit.
+
+extern "c" {
+  # Shimmed: CSFML passes sfVideoMode/sfColor/sfVector2f by value.
+  func ag_sf_window_create(width: int, height: int, bits_per_pixel: int,
+                           title: char*, style: int, state: int) -> void*;
+  func ag_sf_window_should_close(window: void*) -> bool;
+  func ag_sf_window_clear(window: void*, red: u8, green: u8, blue: u8,
+                          alpha: u8);
+  func ag_sf_rect_create(width: int, height: int, red: u8, green: u8,
+                         blue: u8, alpha: u8) -> void*;
+  func ag_sf_rect_set_position(shape: void*, x: int, y: int);
+
+  # Called directly: only pointer parameters, so the C ABI matches.
+  func sfRenderWindow_display(window: void*);
+  func sfRenderWindow_destroy(window: void*);
+  func sfRenderWindow_drawRectangleShape(window: void*, shape: void*,
+                                         states: void*);
+  func sfRectangleShape_destroy(shape: void*);
+}
+
+func main() -> int {
+  # sfDefaultStyle = Titlebar | Resize | Close.
+  var window: void* = ag_sf_window_create(
+      640, 360, 32, "AGC + SFML", 7, 0);
+  if (window == null) {
+    return 1;
+  }
+
+  var rect: void* = ag_sf_rect_create(96, 96, 230u8, 140u8, 60u8, 255u8);
+  var x: int     = 0;
+
+  while (!ag_sf_window_should_close(window)) {
+    ag_sf_window_clear(window, 24u8, 26u8, 32u8, 255u8);
+    ag_sf_rect_set_position(rect, x, 132);
+    sfRenderWindow_drawRectangleShape(window, rect, null);
+    sfRenderWindow_display(window);
+
+    x = x + 4;
+    if (x > 544) {
+      x = 0;
+    }
+  }
+
+  sfRectangleShape_destroy(rect);
+  sfRenderWindow_destroy(window);
+  return 0;
+}

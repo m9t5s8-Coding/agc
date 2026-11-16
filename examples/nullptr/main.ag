@@ -1,0 +1,43 @@
+# `null` and `nullptr` are aliases for a typed null pointer literal.
+#
+# Build from the repository root with:
+#   build/agc examples/nullptr/main.ag -o /tmp/ag_nullptr_demo
+#   /tmp/ag_nullptr_demo
+#
+# The literal has type `void*`, so it can initialize, assign, return, compare,
+# and pass as any pointer type.  It does not convert to `int`.
+
+func is_null(ptr: int*) -> int => ptr == nullptr ? 1 : 0;
+
+func no_pointer() -> int* => null;
+
+func main() -> int {
+  let empty: int* = nullptr;
+  if (empty != null) { return 1; }
+  if (is_null(empty) != 1) { return 2; }
+  if (is_null(nullptr) != 1) { return 3; }
+
+  # Type inference keeps the `void*` null type.
+  let inferred = null;
+  if (is_null(inferred) != 1) { return 4; }
+
+  # Reassignment uses the same literal.
+  var current: int* = nullptr;
+  current = null;
+  if (current != nullptr) { return 5; }
+
+  # Comparisons produce an integer, so they compose with `!`.
+  if (!(empty == null)) { return 6; }
+  if (!(empty == nullptr)) { return 7; }
+
+  # A function returning a pointer can return null.
+  if (no_pointer() != nullptr) { return 8; }
+
+  # Real allocations are non-null.
+  var buffer: int* = agc:alloc(8);
+  if (buffer == nullptr) { return 9; }
+  buffer[0] = 42;
+  if (buffer[0] != 42) { return 10; }
+  agc:free(buffer);
+  return 0;
+}

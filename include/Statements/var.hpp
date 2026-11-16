@@ -24,5 +24,12 @@ private:
   DataType             m_datatype;
   std::string_view     m_name;
   AG_scope<Expression> m_expr;
+  bool                 m_is_static = false;
+  // `var name = value;` infers the type from the initializer.
+  bool                 m_type_inferred = false;
+
+  // Set during semantic analysis for module-level declarations.  Globals are
+  // stored under this qualified name so two modules may each declare `value`.
+  std::string m_qualified_name;
 };
 } // namespace ag

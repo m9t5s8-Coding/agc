@@ -1,0 +1,40 @@
+# Tuple types, tuple literals, and destructuring.
+#
+# Build from the repository root with:
+#   build/agc examples/tuples/main.ag -I lib -o /tmp/ag_tuples
+#   /tmp/ag_tuples
+#
+# Tuple values use pointer-sized slots.  Element types are tracked for
+# destructuring; indexing and named tuple fields are not implemented yet.
+
+mod ag::io;
+
+import ag::io { println };
+
+func pairOf(first: int, second: string) -> (int, string) {
+    return (first, second);
+}
+
+func main() -> int {
+    let pair: (int, string) = (7, "seven");
+    let (number, text) = pair;
+
+    if (number != 7) {
+        return 1;
+    }
+    # String literals are byte pointers, so compare content byte-by-byte.
+    if (text[0] != 's' || text[4] != 'n') {
+        return 2;
+    }
+
+    let (left, right) = pairOf(3, "three");
+    if (left != 3) {
+        return 3;
+    }
+
+    println(number);
+    println(text);
+    println(right);
+    println("tuples ok");
+    return 0;
+}

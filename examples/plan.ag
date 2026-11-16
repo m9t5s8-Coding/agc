@@ -377,7 +377,7 @@ func main(argc: int, argv: char*) -> int {
     var n = 5;
     let r: &int = &n;
     let w: &mut int = &mut n;
-    let v = *r;
+    let v = r;
     println(v);
 
     let addFive = makeAdder(5);

@@ -1,0 +1,12 @@
+# Compatibility entry point for `mod ag;`.
+#
+# The actual library is split into parts under lib/ag/.  Prefer loading only
+# the parts you use:
+#
+#   mod ag::String;
+#
+# This file keeps the older `mod ag;` spelling working by loading the String
+# part.  It does not pull in future parts such as `ag::Vector` or `ag::io`;
+# load those explicitly with `mod ag::io;` and so on.
+
+mod ag::String;
