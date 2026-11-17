@@ -430,7 +430,7 @@ references are not diagnosed.
 | `loop` expressions, labels, `guard` | **Runs** | `break value` yields an integer-shaped result. |
 | `match`, `if let`, `while let` | **Runs** | No exhaustiveness checking; duplicate pattern names can collide. |
 | Structs, enums, impls | **Runs** | Natural field size/alignment (max 8); aggregates are pointer-backed. |
-| `uint`, sized integers, `bool` | **Runs** | Narrowed on assignment, arguments, returns, and memory access. Arithmetic still uses i64 slots (see 02.1). |
+| `uint`, sized integers, `bool` | **Runs** | Narrowed on assignment, arguments, returns, and memory access. Arithmetic uses the operands' common width and wraps there; unsigned `/`, `%`, `>>`, and ordered comparisons follow the common type's signedness (see 02.1). |
 | Traits | **Parse-only** | Only concrete methods behave. |
 | Modules, imports, visibility | **Runs** | Import/module visibility itself is not enforced. |
 | Generics | **Runs (erased)** | No monomorphization; generic enums missing. |

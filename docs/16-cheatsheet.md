@@ -141,6 +141,7 @@ Literal types:
 1000u16    # u16
 4000i32    # i32
 9u64       # u64
+18446744073709551615u64   # full u64 range
 true       # bool
 false      # bool
 null       # void* (converts to pointers, not int)
@@ -288,6 +289,12 @@ a orelse b
 a ?? b
 channel <- value            # send marker
 ```
+
+Arithmetic and bitwise results wrap to the operation's width (mixed widths
+widen to the larger type; `bool` promotes to `int`; shifts use the left
+operand's width). `/`, `%`, `>>`, and ordered comparisons follow the common
+type's signedness; `>>` uses the left operand. An unsuffixed literal is `int`,
+so `a_u8 + 10` is 64-bit while `a_u8 + 10u8` wraps at 8 bits.
 
 ```ag
 # Assignment

@@ -256,6 +256,32 @@ a >> n          # right shift
 `<<` and `>>` are also used by `ag::io` as stream operators, resolved by
 overload when the left operand is a stream.
 
+Shifts and ordered comparisons follow the operand signedness:
+
+```ag
+var u: u64 = 18446744073709551615u64;
+u >> 1u64;      # logical shift, 9223372036854775807
+u > 1u64;       # unsigned comparison, true
+
+var s: i64 = -1i64;
+s >> 1i64;      # arithmetic shift, -1
+s < 1i64;       # signed comparison, true
+```
+
+For `/`, `%`, `<`, `<=`, `>`, and `>=`, operation signedness follows the
+**common type** of the two operands (see 02.1). For `>>`, only the left operand
+decides. A narrow unsigned value mixed with a wider signed value widens to the
+signed type, so the operation is signed.
+
+Arithmetic and bitwise results are wrapped to the operation's width: the common
+operand width, or the left operand's width for shifts.
+
+```ag
+var a: u8 = 250u8;
+a + 10u8;       # 4
+a + 10;         # 260 — `10` is `int`, so the common type is 64-bit
+```
+
 ---
 
 ## 04.5 Assignment operators

@@ -54,25 +54,45 @@ let u = 0u;      # uint
 
 ### Sized-integer semantics
 
-Locals are held in 8-byte registers/slots. Assigning to a fixed-width local,
-passing one as an argument, or returning one narrows it to the declared width
-and then sign- or zero-extends it back into the slot. This gives the expected
-wrap-around behavior:
+Locals are held in 8-byte registers/slots, and arithmetic is width-aware. Each
+operation uses the **common type** of its operands (shifts use the left
+operand's type), and the result is wrapped back to that width before it returns
+to the slot. Assignment, argument passing, returning, and memory access also
+narrow to the declared width. This gives the expected wrap-around behavior:
 
 ```ag
 var a: u8 = 250u8;
-a = a + 10;        # wraps to 4
+a + 10u8;          # 4 — wraps at 8 bits inside the expression
+a = a + 10;        # 4 — assignment narrows the 64-bit result
 
 var b: i8 = 127i8;
-b = b + 1;         # wraps to -128
+b + 1i8;           # -128
+b = b + 1;         # -128
+```
+
+Mixed-width operations widen to the wider operand, and `bool` promotes to
+`int`:
+
+```ag
+var small: u8 = 200u8;
+small + 100;       # 300 — `100` is `int`, so the common type is 64-bit
+small + 100u8;     # 44  — common type is `u8`
+```
+
+Integer literals accept their full declared range. A `u64` literal above
+`i64` max is stored as its two's-complement bit pattern:
+
+```ag
+var top: u64 = 18446744073709551615u64;   # u64 max
+top >> 1u64;                              # 9223372036854775807
 ```
 
 Limitations:
 
-- Arithmetic itself happens in 64-bit slots. Only assignment, argument passing,
-  returning, and memory access apply the declared width.
-- Right shift is always arithmetic, and `/` / `%` always use signed division.
-  Comparison of `u64`/`uint` values uses the signed instruction set.
+- `>>` is logical when the left operand is unsigned and arithmetic otherwise.
+  `/`, `%`, `<`, `<=`, `>`, and `>=` use unsigned instructions when the
+  **common type** is unsigned. A narrow unsigned value mixed with a wider
+  signed value therefore uses signed semantics.
 - `sizeof` does not exist yet.
 
 There is no `long` or `short` keyword; use the sized spellings above. An unknown

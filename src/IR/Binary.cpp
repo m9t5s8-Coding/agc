@@ -10,7 +10,8 @@ namespace {
 void
 emit_binary_op(CodeGenContext&    context,
                BIN_OPERATOR        op,
-               const std::string&  right) {
+               const std::string&  right,
+               bool                is_unsigned) {
   switch (op) {
   case BIN_OPERATOR::ADDITION:
     context.text << std::format("\tadd rax, {}\n", right);
@@ -23,10 +24,16 @@ emit_binary_op(CodeGenContext&    context,
     break;
   case BIN_OPERATOR::DIVISION:
   case BIN_OPERATOR::MODULUS:
-    // rdx is used by idiv for the high half, so the divisor goes in rcx.
+    // rdx is used by div/idiv for the high half, so the divisor goes in rcx.
     context.text << std::format("\tmov rcx, {}\n", right);
-    context.text << "\tcqo\n";
-    context.text << "\tidiv rcx\n";
+    if (is_unsigned) {
+      // Unsigned division uses rdx as the high half of the dividend.
+      context.text << "\txor rdx, rdx\n";
+      context.text << "\tdiv rcx\n";
+    } else {
+      context.text << "\tcqo\n";
+      context.text << "\tidiv rcx\n";
+    }
     if (op == BIN_OPERATOR::MODULUS)
       context.text << "\tmov rax, rdx\n";
     break;
@@ -42,7 +49,10 @@ emit_binary_op(CodeGenContext&    context,
   case BIN_OPERATOR::LEFT_SHIFT:
   case BIN_OPERATOR::RIGHT_SHIFT:
     context.text << std::format("\tmov rcx, {}\n", right);
-    context.text << (op == BIN_OPERATOR::LEFT_SHIFT ? "\tshl rax, cl\n" : "\tsar rax, cl\n");
+    if (op == BIN_OPERATOR::LEFT_SHIFT)
+      context.text << "\tshl rax, cl\n";
+    else
+      context.text << (is_unsigned ? "\tshr rax, cl\n" : "\tsar rax, cl\n");
     break;
   case BIN_OPERATOR::LESS_THAN:
   case BIN_OPERATOR::LESS_THAN_EQUAL:
@@ -53,16 +63,16 @@ emit_binary_op(CodeGenContext&    context,
     context.text << std::format("\tcmp rax, {}\n", right);
     switch (op) {
     case BIN_OPERATOR::LESS_THAN:
-      context.text << "\tsetl al\n";
+      context.text << (is_unsigned ? "\tsetb al\n" : "\tsetl al\n");
       break;
     case BIN_OPERATOR::LESS_THAN_EQUAL:
-      context.text << "\tsetle al\n";
+      context.text << (is_unsigned ? "\tsetbe al\n" : "\tsetle al\n");
       break;
     case BIN_OPERATOR::GREATER_THAN:
-      context.text << "\tsetg al\n";
+      context.text << (is_unsigned ? "\tseta al\n" : "\tsetg al\n");
       break;
     case BIN_OPERATOR::GREATER_THAN_EQUAL:
-      context.text << "\tsetge al\n";
+      context.text << (is_unsigned ? "\tsetae al\n" : "\tsetge al\n");
       break;
     case BIN_OPERATOR::EQUAL_TO:
       context.text << "\tsete al\n";
@@ -104,7 +114,10 @@ Binary::generate_code(CodeGenContext& context) {
     return;
 
   context.text << std::format("\tmov rax, {}\n", resolve_operand(m_function_index, m_left));
-  emit_binary_op(context, m_operator, resolve_operand(m_function_index, m_right));
+  emit_binary_op(context,
+                 m_operator,
+                 resolve_operand(m_function_index, m_right),
+                 m_is_unsigned);
   context.text << std::format("\tmov {}, rax\n", destination);
 }
 

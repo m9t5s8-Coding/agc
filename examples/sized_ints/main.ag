@@ -65,6 +65,56 @@ func main() -> int {
     signed = signed + 1;            # wraps to -128
     if (signed != -128) { return 22; }
 
+    # `u64` literals cover the full unsigned range, and unsigned operations
+    # select unsigned instructions.
+    var top: u64 = 18446744073709551615u64;
+    if (top != 0u64 - 1u64) { return 25; }
+    if (top / 2u64 != 9223372036854775807u64) { return 26; }
+    if (top % 10u64 != 5u64) { return 27; }
+    if (top >> 1u64 != 9223372036854775807u64) { return 28; }
+    if (!(top > 1u64)) { return 29; }
+    if (top < 0u64) { return 30; }
+
+    var divided: u64 = top;
+    divided /= 2u64;
+    if (divided != 9223372036854775807u64) { return 31; }
+
+    # Signed operations still use arithmetic shift and signed division.
+    var negative: i64 = -7i64;
+    if (negative / 2i64 != -3i64) { return 32; }
+    if (negative >> 1i64 != -4i64) { return 33; }
+
+    # Arithmetic uses the operands' common width and wraps there.
+    var wrap8: u8 = 250u8;
+    if (wrap8 + 10u8 != 4) { return 34; }
+    if (wrap8 + 10 != 260) { return 35; }   # `10` is `int`, so 64-bit
+
+    var wrap16: u16 = 60000u16;
+    if (wrap16 + 10000u16 != 4464) { return 36; }
+
+    var wrap32: u32 = 4000000000u32;
+    if (wrap32 + 1000000000u32 != 705032704) { return 37; }
+
+    var narrow_mul: u8 = 200u8;
+    if (narrow_mul * 2u8 != 144) { return 38; }
+    if (0u8 - 1u8 != 255) { return 39; }
+    if ((narrow_mul << 1u8) != 144) { return 40; }
+
+    var compound: u8 = 250u8;
+    if ((compound += 10u8) != 4) { return 41; }
+    if (compound != 4) { return 42; }
+
+    var negate: u8 = 1u8;
+    if (-negate != 255) { return 43; }
+    var invert: u8 = 0u8;
+    if (~invert != 255) { return 44; }
+
+    var counter: u8 = 255u8;
+    counter++;
+    if (counter != 0) { return 45; }
+    counter--;
+    if (counter != 255) { return 46; }
+
     # A typed null pointer.
     let p: u8* = null;
     if (p != null) { return 23; }

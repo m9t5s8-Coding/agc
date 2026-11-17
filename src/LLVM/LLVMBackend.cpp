@@ -57,6 +57,40 @@ quote_llvm_name(std::string_view name) {
   return quoted;
 }
 
+// Convert an AGC integer spelling to an LLVM i64 constant.  Unsigned suffixes
+// may name values above LLONG_MAX; LLVM accepts the full unsigned decimal
+// range and interprets it modulo the i64 width.
+std::string
+llvm_integer_constant(std::string_view text) {
+  const std::string spelling(text);
+  if (spelling.empty())
+    return "0";
+
+  if (spelling.size() > 2 && spelling[0] == '0' &&
+      (spelling[1] == 'b' || spelling[1] == 'B')) {
+    unsigned long long binary = 0;
+    for (size_t i = 2; i < spelling.size(); ++i) {
+      if (spelling[i] != '0' && spelling[i] != '1')
+        return "0";
+      binary = (binary << 1) | (spelling[i] == '1' ? 1ULL : 0ULL);
+    }
+    return std::to_string(binary);
+  }
+
+  char* end = nullptr;
+  if (spelling[0] == '-') {
+    const long long value = std::strtoll(spelling.c_str(), &end, 0);
+    if (end != spelling.c_str() && *end == '\0')
+      return std::to_string(value);
+  } else {
+    const unsigned long long value = std::strtoull(spelling.c_str(), &end, 0);
+    if (end != spelling.c_str() && *end == '\0')
+      return std::to_string(value);
+  }
+
+  return "0";
+}
+
 std::string
 escape_llvm_bytes(const std::string& value) {
   std::string escaped;
@@ -198,23 +232,7 @@ private:
     if (initializer.rfind("str.", 0) == 0)
       return "ptrtoint (ptr " + quote_llvm_name(initializer) + " to i64)";
 
-    char*      end   = nullptr;
-    const long long value = std::strtoll(initializer.c_str(), &end, 0);
-    if (end != initializer.c_str() && *end == '\0')
-      return std::to_string(value);
-
-    if (initializer.size() > 2 && initializer[0] == '0' &&
-        (initializer[1] == 'b' || initializer[1] == 'B')) {
-      long long binary = 0;
-      for (size_t i = 2; i < initializer.size(); ++i) {
-        if (initializer[i] != '0' && initializer[i] != '1')
-          return "0";
-        binary = (binary << 1) | (initializer[i] == '1' ? 1 : 0);
-      }
-      return std::to_string(binary);
-    }
-
-    return "0";
+    return llvm_integer_constant(initializer);
   }
 
   void
@@ -365,23 +383,7 @@ private:
 
     // Integer literals are the only remaining operands the current IR
     // produces.  Base 0 accepts decimal, hexadecimal, and octal spellings.
-    char*      end      = nullptr;
-    const long long value = std::strtoll(key.c_str(), &end, 0);
-    if (end != key.c_str() && *end == '\0')
-      return std::to_string(value);
-
-    // Binary literals are lexed by AGC but are not understood by strtoll.
-    if (key.size() > 2 && key[0] == '0' && (key[1] == 'b' || key[1] == 'B')) {
-      long long binary = 0;
-      for (size_t i = 2; i < key.size(); ++i) {
-        if (key[i] != '0' && key[i] != '1')
-          return "0";
-        binary = (binary << 1) | (key[i] == '1' ? 1 : 0);
-      }
-      return std::to_string(binary);
-    }
-
-    return "0";
+    return llvm_integer_constant(key);
   }
 
   void
@@ -529,10 +531,14 @@ private:
       m_output << "  " << result << " = mul i64 " << left << ", " << right << "\n";
       break;
     case BIN_OPERATOR::DIVISION:
-      m_output << "  " << result << " = sdiv i64 " << left << ", " << right << "\n";
+      m_output << "  " << result << " = "
+               << (binary->m_is_unsigned ? "udiv" : "sdiv") << " i64 "
+               << left << ", " << right << "\n";
       break;
     case BIN_OPERATOR::MODULUS:
-      m_output << "  " << result << " = srem i64 " << left << ", " << right << "\n";
+      m_output << "  " << result << " = "
+               << (binary->m_is_unsigned ? "urem" : "srem") << " i64 "
+               << left << ", " << right << "\n";
       break;
     case BIN_OPERATOR::BITWISE_AND:
     case BIN_OPERATOR::LOGICAL_AND:
@@ -549,7 +555,9 @@ private:
       m_output << "  " << result << " = shl i64 " << left << ", " << right << "\n";
       break;
     case BIN_OPERATOR::RIGHT_SHIFT:
-      m_output << "  " << result << " = ashr i64 " << left << ", " << right << "\n";
+      m_output << "  " << result << " = "
+               << (binary->m_is_unsigned ? "lshr" : "ashr") << " i64 "
+               << left << ", " << right << "\n";
       break;
     case BIN_OPERATOR::LESS_THAN:
     case BIN_OPERATOR::LESS_THAN_EQUAL:
@@ -559,18 +567,19 @@ private:
     case BIN_OPERATOR::NOT_EQUAL_TO: {
       const std::string comparison = new_temp();
       const char*       predicate  = "eq";
+      const bool        is_unsigned = binary->m_is_unsigned;
       switch (binary->m_operator) {
       case BIN_OPERATOR::LESS_THAN:
-        predicate = "slt";
+        predicate = is_unsigned ? "ult" : "slt";
         break;
       case BIN_OPERATOR::LESS_THAN_EQUAL:
-        predicate = "sle";
+        predicate = is_unsigned ? "ule" : "sle";
         break;
       case BIN_OPERATOR::GREATER_THAN:
-        predicate = "sgt";
+        predicate = is_unsigned ? "ugt" : "sgt";
         break;
       case BIN_OPERATOR::GREATER_THAN_EQUAL:
-        predicate = "sge";
+        predicate = is_unsigned ? "uge" : "sge";
         break;
       case BIN_OPERATOR::EQUAL_TO:
         predicate = "eq";

@@ -229,6 +229,10 @@ public:
   bool                 index_signed          = true;
   bool                 is_compound_assignment = false;
 
+  // Division, modulo, right shift, and ordered comparisons select unsigned
+  // instructions when an operand is unsigned.
+  bool                 is_unsigned_operation = false;
+
   // `ptr + n` and `n + ptr` scale the integer by the pointee size.  The flag
   // and scale are resolved during semantic analysis so IR generation does not
   // need the symbol table again.

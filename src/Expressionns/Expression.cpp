@@ -729,6 +729,98 @@ is_integer_like_type(const DataType& type) {
 }
 
 bool
+is_unsigned_integer_like_type(const DataType& type) {
+  return is_integer_like_type(type) && !type.is_signed;
+}
+
+// The type an arithmetic/bitwise operation is performed in.  Sized integers
+// keep their width, mixed widths widen to the larger one, and `bool` promotes
+// to `int`.  This is deliberately close to C's usual arithmetic conversions.
+DataType
+common_arithmetic_type(const DataType& left, const DataType& right) {
+  if (!is_integer_like_type(left) || !is_integer_like_type(right))
+    return left;
+
+  if (left.primitive_type == PrimitiveType::BOOL ||
+      right.primitive_type == PrimitiveType::BOOL)
+    return make_builtin_type("int");
+
+  const auto width_of = [](const DataType& type) {
+    return std::max<size_t>(1, get_type_size(type));
+  };
+  const size_t left_width  = width_of(left);
+  const size_t right_width = width_of(right);
+  const size_t width = std::clamp<size_t>(
+      std::max(left_width, right_width), 1, 8);
+
+  bool is_signed = true;
+  if (left.is_signed == right.is_signed) {
+    is_signed = left.is_signed;
+  } else {
+    const auto& unsigned_type = left.is_signed ? right : left;
+    const auto& signed_type   = left.is_signed ? left : right;
+    is_signed = width_of(signed_type) > width_of(unsigned_type);
+  }
+
+  DataType result;
+  result.kind           = TypeKind::PRIMITIVE;
+  result.primitive_type = PrimitiveType::INT;
+  result.size_in_bytes  = width;
+  result.alignment      = width;
+  result.is_signed      = is_signed;
+  if (width == 1)
+    result.type_name = is_signed ? "i8" : "u8";
+  else if (width == 2)
+    result.type_name = is_signed ? "i16" : "u16";
+  else if (width == 4)
+    result.type_name = is_signed ? "i32" : "u32";
+  else
+    result.type_name = is_signed ? "int" : "u64";
+  return result;
+}
+
+bool
+is_width_aware_operator(BIN_OPERATOR op) {
+  switch (op) {
+  case BIN_OPERATOR::ADDITION:
+  case BIN_OPERATOR::SUBTRACTION:
+  case BIN_OPERATOR::MULTIPLICATION:
+  case BIN_OPERATOR::DIVISION:
+  case BIN_OPERATOR::MODULUS:
+  case BIN_OPERATOR::BITWISE_AND:
+  case BIN_OPERATOR::BITWISE_OR:
+  case BIN_OPERATOR::BITWISE_XOR:
+  case BIN_OPERATOR::LEFT_SHIFT:
+  case BIN_OPERATOR::RIGHT_SHIFT:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// Select unsigned instruction semantics for the operations where signedness
+// changes the result.  Shifts use the left operand's type; division, modulo,
+// and ordered comparisons use the common operation type.
+bool
+uses_unsigned_semantics(BIN_OPERATOR    op,
+                        const DataType& operation_type,
+                        const DataType& left) {
+  switch (op) {
+  case BIN_OPERATOR::RIGHT_SHIFT:
+    return is_unsigned_integer_like_type(left);
+  case BIN_OPERATOR::DIVISION:
+  case BIN_OPERATOR::MODULUS:
+  case BIN_OPERATOR::LESS_THAN:
+  case BIN_OPERATOR::LESS_THAN_EQUAL:
+  case BIN_OPERATOR::GREATER_THAN:
+  case BIN_OPERATOR::GREATER_THAN_EQUAL:
+    return is_unsigned_integer_like_type(operation_type);
+  default:
+    return false;
+  }
+}
+
+bool
 deref_loads_byte(const DataType& type) {
   return type.primitive_type == PrimitiveType::CHAR;
 }
@@ -4193,6 +4285,13 @@ BinaryExpression::analyze_semantics(Parser&               parser,
       return false;
     }
 
+    const DataType operation_type =
+        (bin_operator == BIN_OPERATOR::LEFT_SHIFT ||
+         bin_operator == BIN_OPERATOR::RIGHT_SHIFT)
+            ? left_type
+            : common_arithmetic_type(left_type, right_type);
+    is_unsigned_operation =
+        uses_unsigned_semantics(bin_operator, operation_type, left_type);
     result_type       = left_type;
     result_type_known = true;
     return true;
@@ -4333,6 +4432,14 @@ BinaryExpression::analyze_semantics(Parser&               parser,
     return false;
   }
 
+  const DataType operation_type =
+      (bin_operator == BIN_OPERATOR::LEFT_SHIFT ||
+       bin_operator == BIN_OPERATOR::RIGHT_SHIFT)
+          ? left_type
+          : common_arithmetic_type(left_type, right_type);
+  is_unsigned_operation =
+      uses_unsigned_semantics(bin_operator, operation_type, left_type);
+
   if (is_comparison_operator(bin_operator)) {
     // Comparisons yield an AGC `int` 0/1 rather than the left operand type, so
     // `!(ptr == other)` and arithmetic on comparison results work as expected.
@@ -4344,7 +4451,9 @@ BinaryExpression::analyze_semantics(Parser&               parser,
     return true;
   }
 
-  result_type       = left_type;
+  result_type       = is_width_aware_operator(bin_operator)
+                          ? operation_type
+                          : left_type;
   result_type_known = true;
   return true;
 }
@@ -4365,9 +4474,17 @@ BinaryExpression::generate_ir(LabelCounters& counter,
       }
 
       const auto result = make_temp(counter, parser);
-      parser.add_instructios(
-          AG_cscope<Binary>(result, current, right_value, bin_operator, counter.function_index));
-      return result;
+      parser.add_instructios(AG_cscope<Binary>(result,
+                                               current,
+                                               right_value,
+                                               bin_operator,
+                                               counter.function_index,
+                                               is_unsigned_operation));
+      // The assignment target's width governs the result of `x op= y`.
+      const auto target_type = left->get_data_type();
+      return is_integer_like_type(target_type)
+                 ? narrow_value(result, target_type, counter, parser)
+                 : result;
     };
 
     if (is_reference_target) {
@@ -4642,9 +4759,17 @@ BinaryExpression::generate_ir(LabelCounters& counter,
   const auto r    = right->generate_ir(counter, parser);
   const auto l    = left->generate_ir(counter, parser);
   const auto temp = make_temp(counter, parser);
-  parser.add_instructios(
-      AG_cscope<Binary>(temp, l, r, bin_operator, counter.function_index));
-  return temp;
+  parser.add_instructios(AG_cscope<Binary>(temp,
+                                           l,
+                                           r,
+                                           bin_operator,
+                                           counter.function_index,
+                                           is_unsigned_operation));
+  // Keep integer arithmetic in the operands' declared width, then widen back
+  // into the 64-bit slot used by the rest of the compiler.
+  return is_integer_like_type(result_type)
+             ? narrow_value(temp, result_type, counter, parser)
+             : temp;
 }
 
 std::string
@@ -4722,16 +4847,20 @@ UniaryExpression::generate_ir(LabelCounters& counter,
                              : BIN_OPERATOR::SUBTRACTION;
     parser.add_instructios(
         AG_cscope<Binary>(updated, old_value, "1", op, counter.function_index));
+    const auto narrowed = narrow_value(updated,
+                                       operand->get_data_type(),
+                                       counter,
+                                       parser);
     parser.add_instructios(AG_cscope<DerefStore>(
         address,
-        updated,
+        narrowed,
         counter.function_index,
         index->index_width,
         index->index_signed));
 
     return (un_operator == UN_OPERATOR::PRE_INCREMENT ||
             un_operator == UN_OPERATOR::PRE_DECREMENT)
-               ? updated
+               ? narrowed
                : old_value;
   }
 
@@ -4754,17 +4883,21 @@ UniaryExpression::generate_ir(LabelCounters& counter,
                              : BIN_OPERATOR::SUBTRACTION;
     parser.add_instructios(
         AG_cscope<Binary>(updated, old_value, "1", op, counter.function_index));
+    const auto narrowed = narrow_value(updated,
+                                       member_type,
+                                       counter,
+                                       parser);
     parser.add_instructios(AG_cscope<MemberStore>(
         object,
         static_cast<uint32_t>(member->byte_offset),
-        updated,
+        narrowed,
         counter.function_index,
         memory_width_of(member_type),
         memory_is_signed(member_type)));
 
     return (un_operator == UN_OPERATOR::PRE_INCREMENT ||
             un_operator == UN_OPERATOR::PRE_DECREMENT)
-               ? updated
+               ? narrowed
                : old_value;
   }
 
@@ -4784,12 +4917,16 @@ UniaryExpression::generate_ir(LabelCounters& counter,
                              : BIN_OPERATOR::SUBTRACTION;
     parser.add_instructios(
         AG_cscope<Binary>(updated, old_value, "1", op, counter.function_index));
+    const auto narrowed = narrow_value(updated,
+                                       deref_type,
+                                       counter,
+                                       parser);
     parser.add_instructios(AG_cscope<DerefStore>(
-        address, updated, counter.function_index, width, signedness));
+        address, narrowed, counter.function_index, width, signedness));
 
     return (un_operator == UN_OPERATOR::PRE_INCREMENT ||
             un_operator == UN_OPERATOR::PRE_DECREMENT)
-               ? updated
+               ? narrowed
                : old_value;
   }
 
@@ -4810,12 +4947,16 @@ UniaryExpression::generate_ir(LabelCounters& counter,
                              : BIN_OPERATOR::SUBTRACTION;
     parser.add_instructios(
         AG_cscope<Binary>(updated, old_value, "1", op, counter.function_index));
+    const auto narrowed = narrow_value(updated,
+                                       *operand_declared.pointee,
+                                       counter,
+                                       parser);
     parser.add_instructios(AG_cscope<DerefStore>(
-        address, updated, counter.function_index, width, signedness));
+        address, narrowed, counter.function_index, width, signedness));
 
     return (un_operator == UN_OPERATOR::PRE_INCREMENT ||
             un_operator == UN_OPERATOR::PRE_DECREMENT)
-               ? updated
+               ? narrowed
                : old_value;
   }
 
@@ -4828,7 +4969,7 @@ UniaryExpression::generate_ir(LabelCounters& counter,
     const auto temp = make_temp(counter, parser);
     parser.add_instructios(
         AG_cscope<Binary>(temp, "0", value, BIN_OPERATOR::SUBTRACTION, counter.function_index));
-    return temp;
+    return narrow_value(temp, result_type, counter, parser);
   }
   case UN_OPERATOR::LOGICAl_NOT: {
     const auto temp = make_temp(counter, parser);
@@ -4840,7 +4981,7 @@ UniaryExpression::generate_ir(LabelCounters& counter,
     const auto temp = make_temp(counter, parser);
     parser.add_instructios(
         AG_cscope<Binary>(temp, value, "-1", BIN_OPERATOR::BITWISE_XOR, counter.function_index));
-    return temp;
+    return narrow_value(temp, result_type, counter, parser);
   }
   case UN_OPERATOR::PRE_INCREMENT:
   case UN_OPERATOR::PRE_DECREMENT: {
@@ -4848,8 +4989,9 @@ UniaryExpression::generate_ir(LabelCounters& counter,
     const auto op   = un_operator == UN_OPERATOR::PRE_INCREMENT ? BIN_OPERATOR::ADDITION
                                                                 : BIN_OPERATOR::SUBTRACTION;
     parser.add_instructios(AG_cscope<Binary>(temp, value, "1", op, counter.function_index));
-    parser.add_instructios(AG_cscope<Assign>(temp, value, counter.function_index));
-    return value;
+    const auto narrowed = narrow_value(temp, result_type, counter, parser);
+    parser.add_instructios(AG_cscope<Assign>(narrowed, value, counter.function_index));
+    return narrowed;
   }
   case UN_OPERATOR::POST_INCREMENT:
   case UN_OPERATOR::POST_DECREMENT: {
@@ -4860,7 +5002,8 @@ UniaryExpression::generate_ir(LabelCounters& counter,
     const auto op      = un_operator == UN_OPERATOR::POST_INCREMENT ? BIN_OPERATOR::ADDITION
                                                                     : BIN_OPERATOR::SUBTRACTION;
     parser.add_instructios(AG_cscope<Binary>(updated, value, "1", op, counter.function_index));
-    parser.add_instructios(AG_cscope<Assign>(updated, value, counter.function_index));
+    const auto narrowed = narrow_value(updated, result_type, counter, parser);
+    parser.add_instructios(AG_cscope<Assign>(narrowed, value, counter.function_index));
     return old_value;
   }
   default:
